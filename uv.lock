@@ -1878,6 +1878,23 @@ wheels = [
 ]
 
 [[package]]
+name = "kagglehub"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "kagglesdk" },
+    { name = "packaging" },
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/60/a4/b8780c459360685fc3adf4588a1592be2329de13170302abe98c04f44099/kagglehub-1.0.3.tar.gz", hash = "sha256:1ce657f17f836992bf9c341d4b203380e33beed336dffff970af10457424778b", size = 124370, upload-time = "2026-10-21T23:02:33.551Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0e/49/008002e0bf9bb4cfca85ce5e44314aef39f9a33dd15e31904d659ebca2d8/kagglehub-1.0.3-py3-none-any.whl", hash = "sha256:332f667ea08a173f6fd8e379291b45fafce03351a32582e1500c247b41510d93", size = 73331, upload-time = "2026-10-21T23:02:32.326Z" },
+]
+
+[[package]]
 name = "kagglesdk"
 version = "0.1.38"
 source = { registry = "https://pypi.org/simple" }
@@ -2029,6 +2046,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "gradio" },
     { name = "kaggle" },
+    { name = "kagglehub" },
     { name = "matplotlib" },
     { name = "mlflow" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2058,6 +2076,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.100" },
     { name = "gradio", specifier = ">=4.0" },
     { name = "kaggle", specifier = ">=2.2.5" },
+    { name = "kagglehub", specifier = ">=1.0.3" },
     { name = "matplotlib", specifier = ">=3.7" },
     { name = "mlflow", specifier = ">=2.5" },
     { name = "numpy", specifier = ">=1.24" },
