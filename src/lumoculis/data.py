@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TypeVar
 
 import cv2
+import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
@@ -159,14 +160,20 @@ def train_val_split(
 
 def class_counts_and_weights(
     dataframe: pd.DataFrame,
+    dampen: bool = False,
 ) -> tuple[pd.Series, dict[int, float]]:
     """Return class counts and inverse-frequency weights for imbalanced loss.
 
     Weights are total_samples / (num_classes * class_count), suitable as the
-    ``weight`` argument of ``torch.nn.CrossEntropyLoss``.
+    ``weight`` argument of ``torch.nn.CrossEntropyLoss``. When ``dampen`` is
+    True, weights use the square root of inverse frequency so no class is
+    overweighted relative to the smallest by more than ~2x.
     """
     counts = dataframe["diagnosis"].value_counts().sort_index()
     total = len(dataframe)
     num_classes = len(counts)
-    weights = {int(cls): total / (num_classes * int(count)) for cls, count in counts.items()}
+    inverse = total / (num_classes * counts)
+    if dampen:
+        inverse = np.sqrt(inverse)
+    weights = {int(cls): float(w) for cls, w in inverse.items()}
     return counts, weights

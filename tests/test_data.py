@@ -147,6 +147,20 @@ def test_class_counts_and_weights():
     assert weights[1] == weights[2]
 
 
+def test_class_counts_and_weights_dampen():
+    df = pd.DataFrame({
+        "id_code": ["a", "b", "c", "d", "e"],
+        "diagnosis": [0, 0, 0, 1, 2],  # class 0: 3, class 1: 1, class 2: 1
+    })
+    _, weights = class_counts_and_weights(df)
+    _, damp_weights = class_counts_and_weights(df, dampen=True)
+
+    # Dampening reduces the spread between most and least common class weights
+    spread_plain = max(weights.values()) / min(weights.values())
+    spread_damp = max(damp_weights.values()) / min(damp_weights.values())
+    assert spread_damp < spread_plain
+
+
 def test_missing_image_warns(tmp_path, capsys):
     id_codes = ["img0", "img1"]
     labels = [0, 1]
