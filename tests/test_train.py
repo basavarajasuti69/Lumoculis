@@ -13,6 +13,8 @@ import numpy as np
 from lumoculis.config import Config
 from lumoculis.train import run_training
 
+NUM_CLASSES = 5
+
 
 def _make_synthetic_dataset(tmp_path) -> Config:
     """Create synthetic train.csv + PNGs and return a Config pointing at them."""
@@ -55,7 +57,35 @@ def test_smoke_training_2_batches_1_epoch(tmp_path) -> None:
         max_batches=2,
         epochs_override=1,
         pretrained=False,
+        no_save=True,
     )
 
-    assert os.path.exists(result["best_checkpoint_path"])
+    # With no_save, nothing is written to disk.
+    assert result["best_checkpoint_path"] is None
     assert result["best_qwk"] != float("-inf")
+
+
+def test_smoke_training_saves_checkpoint_and_preds(tmp_path) -> None:
+    config = _make_synthetic_dataset(tmp_path)
+    result = run_training(
+        config,
+        max_batches=2,
+        epochs_override=1,
+        pretrained=False,
+        no_save=False,
+    )
+
+    assert result["best_checkpoint_path"] is not None
+    assert os.path.exists(result["best_checkpoint_path"])
+
+    run_dir = result["run_dir"]
+    preds_path = os.path.join(run_dir, "val_preds.npz")
+    assert os.path.exists(preds_path)
+
+    data = np.load(preds_path, allow_pickle=True)
+    assert "val_ids" in data
+    assert "y_true" in data
+    assert "y_prob" in data
+    assert data["y_prob"].ndim == 2  # noqa: PLR2004
+    assert data["y_prob"].shape[1] == NUM_CLASSES  # 5 classes
+    assert len(data["val_ids"]) == data["y_true"].shape[0] == data["y_prob"].shape[0]

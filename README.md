@@ -16,21 +16,21 @@ validated. Always refer flagged cases to an eye doctor.
 
 ```bash
 # 1. Install uv (https://github.com/astral-sh/uv) if you don't have it.
-# 2. Create the environment and install dependencies.
+# 3. Create the environment and install dependencies.
 uv sync --dev
 
-# 3. Copy the env example and add your Kaggle credentials.
+# 4. Copy the env example and add your Kaggle credentials.
 cp .env.example .env
 # Edit .env with KAGGLE_USERNAME and KAGGLE_KEY.
 
-# 4. Download APTOS 2019 (check the dataset license and terms first).
-python scripts/download_data.py
+# 5. Download APTOS 2019 (check the dataset license and terms first).
+uv run python scripts/download_data.py
 
-# 5. Preprocess images (crops black borders, resizes, Ben Graham contrast).
-python scripts/preprocess_images.py
+# 6. Preprocess images (crops black borders, resizes, Ben Graham contrast).
+uv run python scripts/preprocess_images.py
 
-# 6. Train the baseline (smoke test: only 2 batches).
-python -m src.lumoculis.train --config configs/baseline.yaml --max-batches 2
+# 7. Train the baseline (smoke test: only 2 batches, no real data needed).
+uv run python -m lumoculis.train --config configs/baseline.yaml --max-batches 2 --epochs 1 --no-pretrained --no-save
 ```
 
 ## Layout
