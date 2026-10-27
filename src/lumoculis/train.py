@@ -3,6 +3,11 @@
 Device selection: mps if available, else cpu. ``PYTORCH_ENABLE_MPS_FALLBACK=1``
 is set before torch is imported so MPS ops that lack a Metal implementation
 fall back to CPU instead of crashing. No float64, no autocast/fp16 for now.
+
+Timing: every phase is measured with ``time.perf_counter()``. On MPS,
+``torch.mps.synchronize()`` is called at timing boundaries so that GPU
+execution time is reflected in CPU timings. Synchronization is NOT performed
+inside every batch — only at phase boundaries — to avoid serializing the GPU.
 """
 
 from __future__ import annotations
@@ -43,6 +48,15 @@ def pick_device() -> torch.device:
     return torch.device("cpu")
 
 
+def _mps_sync() -> None:
+    """Synchronize MPS if available; no-op on CPU."""
+    if torch.backends.mps.is_available():
+        torch.mps.synchronize()
+
+
+MLFLOW_LOG_THRESHOLD_S = 0.1
+
+
 def seed_everything(seed: int) -> None:
     """Seed Python, numpy, and torch for reproducibility."""
     random.seed(seed)
@@ -64,26 +78,87 @@ def train_epoch(  # noqa: PLR0913
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     max_batches: int | None = None,
-) -> float:
-    """Run one training epoch; return mean loss over processed batches."""
-    model.train()
-    running_loss = 0.0
-    n_batches = 0
-    for batch_idx, (images, labels) in enumerate(loader):
-        if max_batches is not None and batch_idx >= max_batches:
-            break
-        images = images.to(device)  # noqa: PLW2901
-        labels = labels.to(device)  # noqa: PLW2901
+) -> dict[str, float | int | torch.Tensor]:
+    """Run one training epoch with detailed per-phase timing.
 
+    Returns a dict with:
+      - total_loss: accumulated loss tensor (on device)
+      - n_batches: number of batches processed
+      - data_retrieval_s: time spent in DataLoader.__next__ (__getitem__ + collate)
+      - device_transfer_s: time spent moving batch to device
+      - forward_s: time spent in forward pass
+      - backward_s: time spent in backward pass
+      - optimizer_s: time spent in optimizer step
+      - compute_s: total compute (forward + backward + optimizer)
+
+    MPS is synchronized at phase boundaries so GPU execution time is reflected
+    in CPU timings. Synchronization is NOT performed inside every batch.
+    """
+    model.train()
+    running_loss = torch.tensor(0.0, device=device)
+    n_batches = 0
+    data_retrieval_s = 0.0
+    device_transfer_s = 0.0
+    forward_s = 0.0
+    backward_s = 0.0
+    optimizer_s = 0.0
+
+    iterator = iter(loader)
+    for _batch_idx in range(max_batches if max_batches is not None else len(loader)):
+        # --- Data retrieval: blocking on DataLoader.__next__ (__getitem__) ---
+        t0 = time.perf_counter()
+        try:
+            images, labels = next(iterator)
+        except StopIteration:
+            break
+        data_retrieval_s += time.perf_counter() - t0
+
+        # --- Device transfer ---
+        t0 = time.perf_counter()
+        images = images.to(device)
+        labels = labels.to(device)
+        if device.type == "mps":
+            torch.mps.synchronize()
+        device_transfer_s += time.perf_counter() - t0
+
+        # --- Forward pass ---
+        t0 = time.perf_counter()
         optimizer.zero_grad(set_to_none=True)
         logits = model(images)
-        loss = criterion(logits, labels)
-        loss.backward()
-        optimizer.step()
+        if device.type == "mps":
+            torch.mps.synchronize()
+        forward_s += time.perf_counter() - t0
 
-        running_loss += float(loss.item())
+        # --- Loss ---
+        loss = criterion(logits, labels)
+
+        # --- Backward pass ---
+        t0 = time.perf_counter()
+        loss.backward()
+        if device.type == "mps":
+            torch.mps.synchronize()
+        backward_s += time.perf_counter() - t0
+
+        # --- Optimizer step ---
+        t0 = time.perf_counter()
+        optimizer.step()
+        if device.type == "mps":
+            torch.mps.synchronize()
+        optimizer_s += time.perf_counter() - t0
+
+        running_loss = running_loss + loss.detach()
         n_batches += 1
-    return running_loss / max(n_batches, 1)
+
+    return {
+        "total_loss": running_loss,
+        "n_batches": n_batches,
+        "data_retrieval_s": data_retrieval_s,
+        "device_transfer_s": device_transfer_s,
+        "forward_s": forward_s,
+        "backward_s": backward_s,
+        "optimizer_s": optimizer_s,
+        "compute_s": forward_s + backward_s + optimizer_s,
+    }
 
 
 def validate(  # noqa: PLR0913
@@ -94,34 +169,53 @@ def validate(  # noqa: PLR0913
     num_classes: int,
     val_ids: np.ndarray | None = None,
     max_batches: int | None = None,
-) -> tuple[
-    float, float, float, float, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None
-]:
-    """Validate.
+) -> dict[str, float | int | torch.Tensor | np.ndarray | None]:
+    """Validate with detailed per-phase timing.
 
-    Returns (val_loss, qwk, auroc, sensitivity, specificity, cm, y_true,
-    y_prob, val_ids).
+    Returns a dict with val loss, n_batches, timings, metrics, and arrays.
+    MPS is synchronized at phase boundaries.
     """
     model.eval()
-    running_loss = 0.0
+    running_loss = torch.tensor(0.0, device=device)
     n_batches = 0
+    data_retrieval_s = 0.0
+    device_transfer_s = 0.0
+    forward_s = 0.0
     all_labels: list[np.ndarray] = []
     all_probs: list[np.ndarray] = []
     all_preds: list[np.ndarray] = []
 
+    iterator = iter(loader)
     with torch.no_grad():
-        for batch_idx, (images, labels) in enumerate(loader):
-            if max_batches is not None and batch_idx >= max_batches:
+        for _batch_idx in range(max_batches if max_batches is not None else len(loader)):
+            # --- Data retrieval ---
+            t0 = time.perf_counter()
+            try:
+                images, labels = next(iterator)
+            except StopIteration:
                 break
-            images = images.to(device)  # noqa: PLW2901
-            labels = labels.to(device)  # noqa: PLW2901
+            data_retrieval_s += time.perf_counter() - t0
 
+            # --- Device transfer ---
+            t0 = time.perf_counter()
+            images = images.to(device)
+            labels = labels.to(device)
+            if device.type == "mps":
+                torch.mps.synchronize()
+            device_transfer_s += time.perf_counter() - t0
+
+            # --- Forward pass ---
+            t0 = time.perf_counter()
             logits = model(images)
+            if device.type == "mps":
+                torch.mps.synchronize()
+            forward_s += time.perf_counter() - t0
+
             loss = criterion(logits, labels)
             probs = torch.softmax(logits, dim=1)
             preds = logits.argmax(dim=1)
 
-            running_loss += float(loss.item())
+            running_loss = running_loss + loss.detach()
             n_batches += 1
             all_labels.append(labels.cpu().numpy())
             all_probs.append(probs.cpu().numpy())
@@ -131,17 +225,31 @@ def validate(  # noqa: PLR0913
     y_prob = np.concatenate(all_probs)
     y_pred = np.concatenate(all_preds)
 
-    val_loss = running_loss / max(n_batches, 1)
+    avg_loss = running_loss / max(n_batches, 1)
     qwk = quadratic_weighted_kappa(y_true, y_pred)
     auroc = referable_auroc(y_true, y_prob)
     sensitivity, specificity = referable_sensitivity_specificity(y_true, y_prob)
     cm = compute_confusion_matrix(y_true, y_pred, num_classes=num_classes)
 
-    # Slice val_ids to match the number of samples actually processed.
     if val_ids is not None:
         val_ids = val_ids[: len(y_true)]
 
-    return val_loss, qwk, auroc, sensitivity, specificity, cm, y_true, y_prob, val_ids
+    return {
+        "avg_loss": avg_loss,
+        "n_batches": n_batches,
+        "data_retrieval_s": data_retrieval_s,
+        "device_transfer_s": device_transfer_s,
+        "forward_s": forward_s,
+        "compute_s": forward_s,
+        "qwk": qwk,
+        "auroc": auroc,
+        "sensitivity": sensitivity,
+        "specificity": specificity,
+        "cm": cm,
+        "y_true": y_true,
+        "y_prob": y_prob,
+        "val_ids": val_ids,
+    }
 
 
 def _default_run_name() -> str:
@@ -180,8 +288,17 @@ def _setup_training(
     train_ds: LumoculisDataset,
     pretrained: bool,
     epochs: int,
-) -> tuple[nn.Module, nn.Module, torch.optim.Optimizer, torch.optim.lr_scheduler._LRScheduler]:
-    """Build model, loss, optimizer, and scheduler from config."""
+) -> tuple[
+    nn.Module,
+    nn.Module,
+    torch.optim.Optimizer,
+    torch.optim.lr_scheduler._LRScheduler,
+    dict[int, float],
+]:
+    """Build model, loss, optimizer, and scheduler from config.
+
+    Returns (model, criterion, optimizer, scheduler, class_weights).
+    """
     model = build_model(config.model_name, config.num_classes, pretrained=pretrained).to(device)
     print(f"Trainable parameters: {count_parameters(model):,}")
 
@@ -191,7 +308,8 @@ def _setup_training(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    return model, criterion, optimizer, scheduler
+    weights_dict = {i: float(class_weights[i].item()) for i in range(len(class_weights))}
+    return model, criterion, optimizer, scheduler, weights_dict
 
 
 def _log_mlflow_params(config: Config, device: torch.device) -> None:
@@ -217,6 +335,7 @@ def _save_best_epoch(  # noqa: PLR0913
     """Save the best checkpoint and validation predictions to disk."""
     if no_save:
         return
+    t0 = time.perf_counter()
     torch.save(
         {
             "model_state_dict": model.state_dict(),
@@ -233,6 +352,8 @@ def _save_best_epoch(  # noqa: PLR0913
         y_prob=y_prob,
     )
     mlflow.log_figure(cm_fig, "confusion_matrix.png")
+    elapsed = time.perf_counter() - t0
+    print(f"  checkpoint+mlflow save: {elapsed:.2f}s")
 
 
 def _log_mlflow_artifacts(
@@ -242,12 +363,15 @@ def _log_mlflow_artifacts(
 ) -> None:
     """Log best checkpoint and predictions as MLflow artifacts."""
     if not no_save and best_checkpoint_path.exists():
+        t0 = time.perf_counter()
         mlflow.log_artifact(str(best_checkpoint_path))
         mlflow.log_param("best_checkpoint_path", str(best_checkpoint_path))
         mlflow.log_artifact(str(run_dir / "val_preds.npz"))
+        elapsed = time.perf_counter() - t0
+        print(f"  mlflow artifact upload: {elapsed:.2f}s")
 
 
-def run_training(  # noqa: PLR0913
+def run_training(  # noqa: PLR0913, PLR0915
     config: Config,
     run_name: str | None = None,
     max_batches: int | None = None,
@@ -255,23 +379,59 @@ def run_training(  # noqa: PLR0913
     pretrained: bool = True,
     no_save: bool = False,
 ) -> dict:
-    """Run the full training loop.
+    """Run the full training loop with comprehensive phase timing.
 
     Returns a dict with the best validation QWK, the run directory, and the
     best checkpoint path (None when no_save).
     """
+    # --- Process startup and setup ---
+    t_start_total = time.perf_counter()
     device = pick_device()
     seed_everything(config.seed)
     mlflow.end_run()
+    print(f"Device: {device} (MPS available: {torch.backends.mps.is_available()})")
 
     epochs = epochs_override if epochs_override is not None else config.epochs
 
+    # --- Dataset and DataLoader initialization ---
+    t0 = time.perf_counter()
     csv_path = Path(config.data_dir) / "train.csv"
-    train_ds, val_ds = train_val_split(csv_path, config.processed_dir, config)
+    train_ds, val_ds, dup_report = train_val_split(csv_path, config.processed_dir, config)
     train_loader, val_loader = _build_dataloaders(train_ds, val_ds, config)
+    t_dataset_init = time.perf_counter() - t0
+    print(f"Dataset + DataLoader init: {t_dataset_init:.2f}s")
 
-    model, criterion, optimizer, scheduler = _setup_training(
+    # --- Model initialization ---
+    t0 = time.perf_counter()
+    model, criterion, optimizer, scheduler, class_weights = _setup_training(
         config, device, train_ds, pretrained, epochs
+    )
+    t_model_init = time.perf_counter() - t0
+    print(f"Model init + device transfer: {t_model_init:.2f}s")
+
+    # --- First training batch (warmup, includes MPS shader compilation) ---
+    t0 = time.perf_counter()
+    first_batch = next(iter(train_loader))
+    images_fb, labels_fb = first_batch
+    images_fb = images_fb.to(device)
+    labels_fb = labels_fb.to(device)
+    if device.type == "mps":
+        torch.mps.synchronize()
+    t_first_batch_data = time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+    logits_fb = model(images_fb)
+    loss_fb = criterion(logits_fb, labels_fb)
+    loss_fb.backward()
+    optimizer.step()
+    if device.type == "mps":
+        torch.mps.synchronize()
+    t_first_batch_compute = time.perf_counter() - t0
+    print(
+        f"First batch (warmup): data={t_first_batch_data:.3f}s compute={t_first_batch_compute:.3f}s "
+        f"(includes MPS shader compilation)"
     )
 
     # Per-run checkpoint directory: checkpoints/<run_name>/
@@ -292,21 +452,19 @@ def run_training(  # noqa: PLR0913
 
     with mlflow.start_run(run_name=run_name):
         _log_mlflow_params(config, device)
+        mlflow.log_params({f"class_weight/{i}": w for i, w in class_weights.items()})
 
         for epoch in range(epochs):
-            t0 = time.time()
-            train_loss = train_epoch(model, train_loader, criterion, optimizer, device, max_batches)
-            (
-                val_loss,
-                qwk,
-                auroc,
-                sensitivity,
-                specificity,
-                cm,
-                y_true,
-                y_prob,
-                val_ids,
-            ) = validate(
+            t_epoch0 = time.perf_counter()
+
+            # --- Training ---
+            train_result = train_epoch(
+                model, train_loader, criterion, optimizer, device, max_batches
+            )
+
+            # --- Validation ---
+            t_val0 = time.perf_counter()
+            val_result = validate(
                 model,
                 val_loader,
                 criterion,
@@ -315,43 +473,81 @@ def run_training(  # noqa: PLR0913
                 val_ids=val_ds.df["id_code"].values,
                 max_batches=max_batches,
             )
+            t_val_total = time.perf_counter() - t_val0
+
             scheduler.step()
-            elapsed = time.time() - t0
+            t_epoch_total = time.perf_counter() - t_epoch0
+
+            train_loss = float(
+                train_result["total_loss"].item() / max(train_result["n_batches"], 1)
+            )
+            val_loss = float(val_result["avg_loss"].item() / max(val_result["n_batches"], 1))
 
             print(
                 f"epoch {epoch + 1}/{epochs} "
                 f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} "
-                f"qwk={qwk:.4f} auroc={auroc:.4f} "
-                f"sens={sensitivity:.4f} spec={specificity:.4f} "
-                f"({elapsed:.1f}s)"
+                f"qwk={val_result['qwk']:.4f} auroc={val_result['auroc']:.4f} "
+                f"sens={val_result['sensitivity']:.4f} spec={val_result['specificity']:.4f} "
+                f"({t_epoch_total:.1f}s)"
+            )
+            print(
+                f"  timing: train_batches={train_result['n_batches']} "
+                f"val_batches={val_result['n_batches']} "
+                f"train_data_retrieval={train_result['data_retrieval_s']:.2f}s "
+                f"train_device_transfer={train_result['device_transfer_s']:.2f}s "
+                f"train_forward={train_result['forward_s']:.2f}s "
+                f"train_backward={train_result['backward_s']:.2f}s "
+                f"train_optimizer={train_result['optimizer_s']:.2f}s "
+                f"val_data_retrieval={val_result['data_retrieval_s']:.2f}s "
+                f"val_device_transfer={val_result['device_transfer_s']:.2f}s "
+                f"val_forward={val_result['forward_s']:.2f}s "
+                f"max_batches={max_batches if max_batches is not None else 'full'}"
+            )
+            print(
+                f"  epoch breakdown: train={t_epoch_total - t_val_total:.2f}s "
+                f"val={t_val_total:.2f}s total={t_epoch_total:.2f}s"
             )
 
+            # --- MLflow metrics ---
+            t_mlflow0 = time.perf_counter()
             mlflow.log_metrics(
                 {
                     "train_loss": train_loss,
                     "val_loss": val_loss,
-                    "qwk": qwk,
-                    "referable_auroc": auroc,
-                    "referable_sensitivity": sensitivity,
-                    "referable_specificity": specificity,
-                    "epoch_time_s": round(elapsed, 3),
+                    "qwk": float(val_result["qwk"]),
+                    "referable_auroc": float(val_result["auroc"]),
+                    "referable_sensitivity": float(val_result["sensitivity"]),
+                    "referable_specificity": float(val_result["specificity"]),
+                    "epoch_time_s": round(t_epoch_total, 3),
+                    "train_data_retrieval_s": round(float(train_result["data_retrieval_s"]), 3),
+                    "train_device_transfer_s": round(float(train_result["device_transfer_s"]), 3),
+                    "train_forward_s": round(float(train_result["forward_s"]), 3),
+                    "train_backward_s": round(float(train_result["backward_s"]), 3),
+                    "train_optimizer_s": round(float(train_result["optimizer_s"]), 3),
+                    "val_data_retrieval_s": round(float(val_result["data_retrieval_s"]), 3),
+                    "val_device_transfer_s": round(float(val_result["device_transfer_s"]), 3),
+                    "val_forward_s": round(float(val_result["forward_s"]), 3),
                 },
                 step=epoch,
             )
+            t_mlflow = time.perf_counter() - t_mlflow0
+            if t_mlflow > MLFLOW_LOG_THRESHOLD_S:
+                print(f"  mlflow log_metrics: {t_mlflow:.2f}s")
 
-            if qwk > best_qwk:
-                best_qwk = qwk
-                best_cm_fig = render_confusion_matrix(cm)
-                best_val_ids = val_ids
-                best_y_true = y_true
-                best_y_prob = y_prob
+            # --- Best checkpoint ---
+            if val_result["qwk"] > best_qwk:
+                best_qwk = float(val_result["qwk"])
+                best_cm_fig = render_confusion_matrix(val_result["cm"])
+                best_val_ids = val_result["val_ids"]
+                best_y_true = val_result["y_true"]
+                best_y_prob = val_result["y_prob"]
                 _save_best_epoch(
                     no_save,
                     run_dir,
                     model,
                     config,
                     epoch,
-                    qwk,
+                    best_qwk,
                     best_cm_fig,
                     best_val_ids,
                     best_y_true,
@@ -359,6 +555,9 @@ def run_training(  # noqa: PLR0913
                 )
 
         _log_mlflow_artifacts(no_save, run_dir, best_checkpoint_path)
+
+    t_total = time.perf_counter() - t_start_total
+    print(f"Total wall-clock time: {t_total:.1f}s")
 
     return {
         "best_qwk": best_qwk,

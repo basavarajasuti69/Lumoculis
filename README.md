@@ -16,21 +16,30 @@ validated. Always refer flagged cases to an eye doctor.
 
 ```bash
 # 1. Install uv (https://github.com/astral-sh/uv) if you don't have it.
-# 3. Create the environment and install dependencies.
+# 2. Create the environment and install dependencies.
 uv sync --dev
 
-# 4. Copy the env example and add your Kaggle credentials.
+# 3. Copy the env example and add your Kaggle credentials.
 cp .env.example .env
 # Edit .env with KAGGLE_USERNAME and KAGGLE_KEY.
 
-# 5. Download APTOS 2019 (check the dataset license and terms first).
+# 4. Download APTOS 2019 (check the dataset license and terms first).
 uv run python scripts/download_data.py
 
-# 6. Preprocess images (crops black borders, resizes, Ben Graham contrast).
+# 5. Preprocess images (crops black borders, resizes, Ben Graham contrast).
 uv run python scripts/preprocess_images.py
+
+# 6. Inspect the dataset (class balance, duplicate groups, weight ratios).
+uv run python scripts/inspect_data.py
 
 # 7. Train the baseline (smoke test: only 2 batches, no real data needed).
 uv run python -m lumoculis.train --config configs/baseline.yaml --max-batches 2 --epochs 1 --no-pretrained --no-save
+
+# 8. Full baseline run (real data, pretrained weights).
+uv run python -m lumoculis.train --config configs/baseline.yaml
+
+# Open the MLflow UI to view runs.
+uv run mlflow ui --backend-store-uri ./mlruns
 ```
 
 ## Layout
@@ -50,3 +59,20 @@ uv run python -m lumoculis.train --config configs/baseline.yaml --max-batches 2 
 See `MODEL_CARD.md` for intended use, out-of-scope use, data, metrics, bias,
 and limitations. APTOS has no patient IDs, so patient-level train/val splitting
 cannot be guaranteed.
+
+### Train/val split trade-offs
+
+The split is **group-aware**: exact duplicate images (same SHA-256 of the
+processed PNG) are always kept in the same split (train or val) to prevent
+leakage. This slightly reduces the effective number of independent groups
+available for stratification, so class proportions in each split are
+approximate rather than exact. Grouping exact duplicates does **not** identify
+all images from the same patient, so patient-level separation is still not
+guaranteed. Use `scripts/inspect_data.py` to review duplicate groups,
+cross-split groups, and conflicting labels before training.
+
+### --no-save flag
+
+`uv run python -m lumoculis.train --no-save` skips writing checkpoints,
+validation predictions, and MLflow artifacts while still computing and
+printing metrics. Useful for smoke tests and CI.

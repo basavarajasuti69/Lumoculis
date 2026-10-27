@@ -1,21 +1,20 @@
 """Inspect the real APTOS dataset after preprocessing.
 
 Loads data/raw/train.csv and cached PNGs from data/processed/, builds the
-stratified train/val split, and prints:
+group-aware train/val split, and prints:
   - train/val sizes
   - per-class counts in each split
   - class weights (and whether any exceeds ~5x the smallest)
+  - exact duplicate groups: unique groups, images involved, cross-split
+    groups, conflicting-label groups
   - one batch's shapes/dtypes/value ranges
-  - exact duplicate image count (hash of processed PNG bytes)
 
 Saves a grid of 16 augmented training images to data/inspect_grid.png
-(gitignored). If duplicates exist, reports them and proposes keeping them
-in the same split.
+(gitignored).
 """
 
 from __future__ import annotations
 
-import hashlib
 import sys
 from pathlib import Path
 
@@ -31,7 +30,9 @@ from lumoculis.config import Config
 from lumoculis.data import (
     IMAGENET_MEAN,
     IMAGENET_STD,
+    _representative_label,
     class_counts_and_weights,
+    find_duplicate_groups,
     train_val_split,
 )
 
@@ -41,32 +42,49 @@ GRID_PATH = Path("data/inspect_grid.png")
 WEIGHT_RATIO_WARN = 5.0
 
 
-def _hash_file(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def _count_duplicates(processed_dir: Path, id_codes) -> tuple[int, list[tuple[str, str]]]:
-    """Return (duplicate_count, list of (id_code_1, id_code_2) duplicate pairs)."""
-    hashes: dict[str, list[str]] = {}
-    for id_code in id_codes:
-        p = processed_dir / f"{id_code}.png"
-        if p.exists():
-            hashes.setdefault(_hash_file(p), []).append(str(id_code))
-    pairs = []
-    dup_count = 0
-    for ids in hashes.values():
-        if len(ids) > 1:
-            dup_count += len(ids) - 1
-            for i in range(len(ids)):
-                for j in range(i + 1, len(ids)):
-                    pairs.append((ids[i], ids[j]))
-    return dup_count, pairs
-
-
 def _class_counts(df) -> dict[int, int]:
     return {
         int(cls): int(count) for cls, count in df["diagnosis"].value_counts().sort_index().items()
     }
+
+
+def _report_duplicates(train_ds, val_ds, processed_dir: Path) -> None:
+    """Report exact duplicate groups: counts, cross-split, conflicting labels."""
+    all_ids = list(train_ds.df["id_code"]) + list(val_ds.df["id_code"])
+    id_to_label = {
+        str(k): int(v)
+        for k, v in zip(train_ds.df["id_code"], train_ds.df["diagnosis"], strict=True)
+    } | {str(k): int(v) for k, v in zip(val_ds.df["id_code"], val_ds.df["diagnosis"], strict=True)}
+    hash_groups = find_duplicate_groups(processed_dir, all_ids)
+    dup_groups = {h: ids for h, ids in hash_groups.items() if len(ids) > 1}
+
+    train_id_set = set(train_ds.df["id_code"].astype(str))
+    val_id_set = set(val_ds.df["id_code"].astype(str))
+
+    print(f"exact duplicate groups: {len(dup_groups)}")
+    print(f"images in duplicate groups: {sum(len(ids) for ids in dup_groups.values())}")
+
+    cross_split = []
+    for h, ids in dup_groups.items():
+        in_train = any(gid in train_id_set for gid in ids)
+        in_val = any(gid in val_id_set for gid in ids)
+        if in_train and in_val:
+            cross_split.append((h, ids))
+    print(f"duplicate groups crossing train/val: {len(cross_split)}")
+    if cross_split:
+        print("WARNING: duplicates cross the train/val boundary (leakage!):")
+        for h, ids in cross_split:
+            print(f"  {h[:16]}...: {ids}")
+
+    conflicting = []
+    for h, ids in dup_groups.items():
+        labels = [id_to_label[gid] for gid in ids]
+        if _representative_label(labels) == -1:
+            conflicting.append((h, ids, labels))
+    print(f"duplicate groups with conflicting labels: {len(conflicting)}")
+    if conflicting:
+        for h, ids, labels in conflicting:
+            print(f"  {h[:16]}...: ids={ids}, labels={labels}")
 
 
 def main() -> int:
@@ -89,7 +107,7 @@ def main() -> int:
         seed=42,
     )
 
-    train_ds, val_ds = train_val_split(CSV_PATH, PROCESSED_DIR, config)
+    train_ds, val_ds, dup_report = train_val_split(CSV_PATH, PROCESSED_DIR, config)
 
     print(f"train size: {len(train_ds)}")
     print(f"val size:   {len(val_ds)}")
@@ -104,19 +122,16 @@ def main() -> int:
     ratio = max_w / min_w if min_w > 0 else float("inf")
     print(f"max/min weight ratio: {ratio:.2f}x")
     if ratio > WEIGHT_RATIO_WARN:
-        print("WARNING: a class weight exceeds ~5x the smallest; consider --dampen.")
+        print("WARNING: a class weight exceeds ~5x the smallest; consider dampened weights.")
         _, damp_weights = class_counts_and_weights(train_ds.df, dampen=True)
         print(f"dampened weights: {damp_weights}")
 
-    # Duplicate images by PNG byte hash.
-    all_ids = list(train_ds.df["id_code"]) + list(val_ds.df["id_code"])
-    dup_count, dup_pairs = _count_duplicates(PROCESSED_DIR, all_ids)
-    print(f"exact duplicate images (by PNG hash): {dup_count}")
-    if dup_pairs:
-        print("Duplicate pairs:")
-        for a, b in dup_pairs:
-            print(f"  {a} == {b}")
-        print("Proposal: keep duplicate images in the same split (train or val) to avoid leakage.")
+    print(f"duplicate groups (from split): {dup_report['n_dup_groups']}")
+    print(f"images in duplicate groups: {dup_report['n_dup_images']}")
+    print(f"conflicting groups (from split): {len(dup_report['conflicting_groups'])}")
+    print(f"cross-split groups (from split): {len(dup_report['cross_split_groups'])}")
+
+    _report_duplicates(train_ds, val_ds, PROCESSED_DIR)
 
     # One batch shapes/dtypes/value ranges.
     train_loader = DataLoader(train_ds, batch_size=16, shuffle=True, num_workers=0)
@@ -131,7 +146,6 @@ def main() -> int:
     fig, axes = plt.subplots(4, 4, figsize=(8, 8))
     for ax in axes.flat:
         img, _ = train_ds[np.random.randint(len(train_ds))]
-        # Undo ImageNet normalization for display.
         mean = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
         std = torch.tensor(IMAGENET_STD).view(3, 1, 1)
         disp = img * std + mean

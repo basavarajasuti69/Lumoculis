@@ -12,21 +12,33 @@ import torch
 from lumoculis.config import Config
 from lumoculis.data import (
     LumoculisDataset,
+    _representative_label,
     class_counts_and_weights,
+    find_duplicate_groups,
     train_val_split,
 )
 
-EXPECTED_TRAIN = 30
-EXPECTED_VAL = 10
+EXPECTED_TRAIN = 32
+EXPECTED_VAL = 8
 CLASS_ZERO_COUNT = 3
+NUM_CLASSES = 5
 
 
-def _make_synthetic_images(tmp_path, id_codes) -> None:
-    """Create synthetic PNG images in data/processed/ under tmp_path."""
+def _make_synthetic_images(tmp_path, id_codes, duplicate_of=None) -> None:
+    """Create synthetic PNG images in data/processed/ under tmp_path.
+
+    If ``duplicate_of`` is a dict {id_code: source_id_code}, the image for
+    id_code is an exact copy of the source image (same bytes, same hash).
+    """
     processed_dir = tmp_path / "processed"
     processed_dir.mkdir()
+    images = {}
     for id_code in id_codes:
-        img = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+        if duplicate_of and id_code in duplicate_of:
+            img = images[duplicate_of[id_code]]
+        else:
+            img = np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
+            images[id_code] = img
         cv2.imwrite(str(processed_dir / f"{id_code}.png"), img)
     return processed_dir
 
@@ -100,7 +112,7 @@ def test_train_val_split_stratified(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes)
 
-    train_ds, val_ds = train_val_split(csv_path, processed_dir, _config(), val_size=0.25)
+    train_ds, val_ds, _ = train_val_split(csv_path, processed_dir, _config(), val_size=0.25)
 
     assert len(train_ds) == EXPECTED_TRAIN
     assert len(val_ds) == EXPECTED_VAL
@@ -118,8 +130,12 @@ def test_train_val_split_reproducible(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes)
 
-    train_ds_1, val_ds_1 = train_val_split(csv_path, processed_dir, _config(seed=42), val_size=0.25)
-    train_ds_2, val_ds_2 = train_val_split(csv_path, processed_dir, _config(seed=42), val_size=0.25)
+    train_ds_1, val_ds_1, _ = train_val_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.25
+    )
+    train_ds_2, val_ds_2, _ = train_val_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.25
+    )
 
     train_ids_1 = [str(train_ds_1.df.iloc[i]["id_code"]) for i in range(len(train_ds_1))]
     train_ids_2 = [str(train_ds_2.df.iloc[i]["id_code"]) for i in range(len(train_ds_2))]
@@ -128,6 +144,89 @@ def test_train_val_split_reproducible(tmp_path):
     val_ids_1 = [str(val_ds_1.df.iloc[i]["id_code"]) for i in range(len(val_ds_1))]
     val_ids_2 = [str(val_ds_2.df.iloc[i]["id_code"]) for i in range(len(val_ds_2))]
     assert val_ids_1 == val_ids_2
+
+
+def test_duplicates_never_cross_split(tmp_path):
+    """Exact duplicate images must never appear in both train and val."""
+    id_codes = [f"img{i}" for i in range(20)]
+    # Make img0..img3 exact duplicates of each other, img4..img7 duplicates of each other
+    duplicate_of = {}
+    for i in range(1, 4):
+        duplicate_of[f"img{i}"] = "img0"
+    for i in range(5, 8):
+        duplicate_of[f"img{i}"] = "img4"
+    labels = [i % 4 for i in range(20)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
+
+    train_ds, val_ds, dup_report = train_val_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.25
+    )
+
+    train_ids = set(train_ds.df["id_code"].astype(str))
+    val_ids = set(val_ds.df["id_code"].astype(str))
+
+    # No id_code appears in both splits
+    overlap = train_ids & val_ids
+    assert not overlap, f"id_codes in both train and val: {overlap}"
+
+    # No duplicate group crosses the boundary
+    for h, ids in dup_report["cross_split_groups"]:
+        raise AssertionError(f"duplicate group crosses split: {h} -> {ids}")
+
+    # Every duplicate group is entirely in train or entirely in val
+    hash_groups = find_duplicate_groups(processed_dir, id_codes)
+    for h, ids in hash_groups.items():
+        if len(ids) > 1:
+            in_train = all(gid in train_ids for gid in ids)
+            in_val = all(gid in val_ids for gid in ids)
+            assert in_train or in_val, f"duplicate group {h} split across train/val: {ids}"
+
+
+def test_conflicting_labels_detected(tmp_path):
+    """Duplicate groups with conflicting diagnosis labels are reported."""
+    id_codes = [f"img{i}" for i in range(12)]
+    # img0 and img1 are exact duplicates but have different labels (0 vs 1)
+    duplicate_of = {"img1": "img0"}
+    labels = [0, 1, 2, 2, 3, 3, 4, 4, 0, 1, 2, 3]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
+
+    train_ds, val_ds, dup_report = train_val_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.25
+    )
+
+    # The conflicting group (img0, img1) should be in conflicting_groups
+    conflicting = dup_report["conflicting_groups"]
+    assert len(conflicting) >= 1, f"expected at least 1 conflicting group, got {conflicting}"
+    found = False
+    for _h, ids in conflicting:
+        if set(ids) == {"img0", "img1"}:
+            found = True
+    assert found, f"conflicting group {{img0, img1}} not in {conflicting}"
+
+
+def test_duplicate_group_reproducible(tmp_path):
+    """Duplicate grouping is reproducible for a fixed seed."""
+    id_codes = [f"img{i}" for i in range(16)]
+    duplicate_of = {f"img{i}": "img0" for i in range(1, 5)}  # img0..img4 are duplicates
+    labels = [i % 4 for i in range(16)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
+
+    _, _, report1 = train_val_split(csv_path, processed_dir, _config(seed=42), val_size=0.25)
+    _, _, report2 = train_val_split(csv_path, processed_dir, _config(seed=42), val_size=0.25)
+
+    assert report1["n_dup_groups"] == report2["n_dup_groups"]
+    assert report1["n_dup_images"] == report2["n_dup_images"]
+
+    train_ids_1 = set(
+        train_val_split(csv_path, processed_dir, _config(seed=42), val_size=0.25)[0].df["id_code"]
+    )
+    train_ids_2 = set(
+        train_val_split(csv_path, processed_dir, _config(seed=42), val_size=0.25)[0].df["id_code"]
+    )
+    assert train_ids_1 == train_ids_2
 
 
 def test_class_counts_and_weights():
@@ -179,5 +278,13 @@ def test_val_has_no_augmentation_transform(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes)
 
-    _, val_ds = train_val_split(csv_path, processed_dir, _config(), val_size=0.5)
+    _, val_ds, _ = train_val_split(csv_path, processed_dir, _config(), val_size=0.5)
     assert val_ds.transform is None
+
+
+def test_representative_label_conflicting():
+    """_representative_label returns -1 for conflicting groups."""
+    assert _representative_label([0, 0, 0]) == 0
+    assert _representative_label([1, 1, 2]) == 1
+    assert _representative_label([0, 1]) == -1  # tie -> conflicting
+    assert _representative_label([0, 1, 2]) == -1  # all different -> conflicting

@@ -90,3 +90,58 @@ def test_render_confusion_matrix_returns_figure() -> None:
     fig = metrics.render_confusion_matrix(cm, class_names=["non-ref", "ref"])
     assert isinstance(fig, matplotlib.figure.Figure)
     assert len(fig.axes) >= 1
+
+
+def test_bootstrap_qwk_ci_perfect() -> None:
+    y_true = np.array([0, 1, 2, 3, 4] * 20)
+    y_pred = y_true.copy()
+    point, lo, hi = metrics.bootstrap_qwk_ci(y_true, y_pred, n_bootstrap=50, seed=42)
+    assert point == 1.0
+    assert lo == 1.0
+    assert hi == 1.0
+
+
+def test_bootstrap_qwk_ci_worst() -> None:
+    y_true = np.array([0, 4])
+    y_pred = np.array([4, 0])
+    point, lo, hi = metrics.bootstrap_qwk_ci(y_true, y_pred, n_bootstrap=50, seed=42)
+    assert point < 0.0
+    assert lo <= point <= hi
+
+
+def test_bootstrap_referable_auroc_ci_perfect() -> None:
+    # Non-referable (grades 0,1) -> prob 0; referable (grades 2,3,4) -> prob 1
+    y_true = np.array([0] * 10 + [1] * 10 + [2] * 10 + [3] * 10 + [4] * 10)
+    probs = np.zeros((50, 5))
+    probs[0:20, 0] = 1.0  # grades 0-1 -> all mass on class 0
+    probs[20:50, 2] = 1.0  # grades 2-4 -> all mass on class 2
+    point, lo, hi = metrics.bootstrap_referable_auroc_ci(y_true, probs, n_bootstrap=50, seed=42)
+    assert point == 1.0
+
+
+def test_bootstrap_referable_sens_spec_ci() -> None:
+    # Non-referable (grades 0,1) -> prob 0; referable (grades 2,3,4) -> prob 1
+    y_true = np.array([0] * 10 + [1] * 10 + [2] * 10 + [3] * 10 + [4] * 10)
+    probs = np.zeros((50, 5))
+    probs[0:20, 0] = 1.0  # non-referable
+    probs[20:50, 2] = 1.0  # referable
+    (s_point, s_lo, s_hi), (sp_point, sp_lo, sp_hi) = metrics.bootstrap_referable_sens_spec_ci(
+        y_true, probs, threshold=0.5, n_bootstrap=50, seed=42
+    )
+    assert s_point == 1.0
+    assert sp_point == 1.0
+    assert s_lo <= s_point <= s_hi
+    assert sp_lo <= sp_point <= sp_hi
+
+
+def test_bootstrap_per_class_sensitivity_ci() -> None:
+    y_true = np.array([0, 1, 2, 3, 4] * 10)
+    y_pred = y_true.copy()
+    results = metrics.bootstrap_per_class_sensitivity_ci(
+        y_true, y_pred, num_classes=metrics.NUM_CLASSES, n_bootstrap=50, seed=42
+    )
+    assert len(results) == metrics.NUM_CLASSES
+    for point, lo, hi in results:
+        assert point == 1.0
+        assert lo == 1.0
+        assert hi == 1.0
