@@ -1,0 +1,56 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Virtual environments and caches
+.venv/
+venv/
+env/
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Data and checkpoints (do not copy into image; mount at runtime)
+data/
+checkpoints/
+mlruns/
+*.pt
+*.npz
+*.npy
+
+# Local secrets and credentials
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+.kaggle/
+
+# Image outputs (generated at runtime)
+*.png
+*.jpg
+*.jpeg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Notebooks (not needed at runtime)
+notebooks/
+
+# Scripts (not needed at runtime)
+scripts/
+
+# Docker metadata
+.dockerignore
