@@ -374,7 +374,7 @@ def _log_mlflow(
     fitted: bool,
 ) -> None:
     """Log calibration results to MLflow."""
-    import mlflow  # noqa: PLC0415
+    import mlflow
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(experiment)

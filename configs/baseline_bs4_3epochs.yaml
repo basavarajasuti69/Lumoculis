@@ -1,0 +1,23 @@
+# Baseline experiment config for Lumoculis (APTOS 2019, DR grades 0-4).
+# Referable DR = grade >= 2.
+
+image_size: 384
+batch_size: 4
+epochs: 10
+lr: 0.0003
+model_name: efficientnet_b0
+seed: 42
+
+data_dir: data/raw
+processed_dir: data/processed
+checkpoint_dir: checkpoints
+mlflow_dir: mlruns
+mlflow_experiment: lumoculis
+
+num_classes: 5
+num_workers: 0
+pin_memory: false
+weight_decay: 0.05
+label_smoothing: 0.0
+augment: light
+threshold_referable: 0.5
