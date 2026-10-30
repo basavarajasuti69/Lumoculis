@@ -149,7 +149,7 @@ def main() -> int:  # noqa: PLR0915
         if (
             results.get("small_nn_first", (999,))[0] < 60
             and results.get("matmul_mps_512", (999,))[0] < 30
-        ):  # noqa: PLR2004
+        ):
             from lumoculis.model import build_model  # noqa: PLC0415
 
             def effnet_test():

@@ -30,7 +30,12 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from lumoculis.config import Config
-from lumoculis.data import LumoculisDataset, class_counts_and_weights, train_val_split
+from lumoculis.data import (
+    LumoculisDataset,
+    class_counts_and_weights,
+    create_weighted_sampler,
+    train_val_split,
+)
 from lumoculis.metrics import (
     compute_confusion_matrix,
     quadratic_weighted_kappa,
@@ -104,7 +109,10 @@ def train_epoch(  # noqa: PLR0913
     optimizer_s = 0.0
 
     iterator = iter(loader)
-    for _batch_idx in range(max_batches if max_batches is not None else len(loader)):
+    total_batches = max_batches if max_batches is not None else len(loader)
+    progress_interval = 25
+    t_epoch_start = time.perf_counter()
+    for batch_idx in range(total_batches):
         # --- Data retrieval: blocking on DataLoader.__next__ (__getitem__) ---
         t0 = time.perf_counter()
         try:
@@ -112,6 +120,9 @@ def train_epoch(  # noqa: PLR0913
         except StopIteration:
             break
         data_retrieval_s += time.perf_counter() - t0
+        if (batch_idx + 1) % progress_interval == 0 or (batch_idx + 1) == total_batches:
+            elapsed = time.perf_counter() - t_epoch_start
+            print(f"  [train] batch {batch_idx + 1}/{total_batches} elapsed={elapsed:.1f}s")
 
         # --- Device transfer ---
         t0 = time.perf_counter()
@@ -161,7 +172,7 @@ def train_epoch(  # noqa: PLR0913
     }
 
 
-def validate(  # noqa: PLR0913
+def validate(  # noqa: PLR0913, PLR0915
     model: nn.Module,
     loader: DataLoader,
     criterion: nn.Module,
@@ -186,8 +197,11 @@ def validate(  # noqa: PLR0913
     all_preds: list[np.ndarray] = []
 
     iterator = iter(loader)
+    total_batches = max_batches if max_batches is not None else len(loader)
+    progress_interval = 25
+    t_epoch_start = time.perf_counter()
     with torch.no_grad():
-        for _batch_idx in range(max_batches if max_batches is not None else len(loader)):
+        for batch_idx in range(total_batches):
             # --- Data retrieval ---
             t0 = time.perf_counter()
             try:
@@ -195,6 +209,9 @@ def validate(  # noqa: PLR0913
             except StopIteration:
                 break
             data_retrieval_s += time.perf_counter() - t0
+            if (batch_idx + 1) % progress_interval == 0 or (batch_idx + 1) == total_batches:
+                elapsed = time.perf_counter() - t_epoch_start
+                print(f"  [val] batch {batch_idx + 1}/{total_batches} elapsed={elapsed:.1f}s")
 
             # --- Device transfer ---
             t0 = time.perf_counter()
@@ -263,10 +280,24 @@ def _build_dataloaders(
     config: Config,
 ) -> tuple[DataLoader, DataLoader]:
     """Build train and val DataLoaders from the datasets and config."""
+    train_sampler = None
+    train_shuffle = True
+    use_weighted = getattr(config, "use_weighted_sampler", False)
+    if use_weighted:
+        try:
+            train_sampler = create_weighted_sampler(
+                train_ds.df, config.num_classes, seed=config.seed
+            )
+            train_shuffle = False
+        except Exception:
+            train_sampler = None
+            train_shuffle = True
+
     train_loader = DataLoader(
         train_ds,
         batch_size=config.batch_size,
-        shuffle=True,
+        shuffle=train_shuffle if train_sampler is None else False,
+        sampler=train_sampler,
         num_workers=config.num_workers,
         pin_memory=False,
         persistent_workers=False,
@@ -481,7 +512,7 @@ def run_training(  # noqa: PLR0913, PLR0915
             train_loss = float(
                 train_result["total_loss"].item() / max(train_result["n_batches"], 1)
             )
-            val_loss = float(val_result["avg_loss"].item() / max(val_result["n_batches"], 1))
+            val_loss = float(val_result["avg_loss"].item()) if isinstance(val_result["avg_loss"], torch.Tensor) else float(val_result["avg_loss"])
 
             print(
                 f"epoch {epoch + 1}/{epochs} "

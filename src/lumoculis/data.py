@@ -26,7 +26,7 @@ import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, WeightedRandomSampler
 from torchvision import transforms
 
 from lumoculis.config import Config
@@ -313,3 +313,31 @@ def class_counts_and_weights(
         inverse = np.sqrt(inverse)
     weights = {int(cls): float(w) for cls, w in inverse.items()}
     return counts, weights
+
+
+def create_weighted_sampler(
+    dataframe: pd.DataFrame,
+    num_classes: int,
+    seed: int | None = None,
+) -> WeightedRandomSampler:
+    """Create a WeightedRandomSampler using inverse class frequency."""
+    counts, _ = class_counts_and_weights(dataframe, dampen=False)
+    # inverse frequency weights per class
+    class_weights = {}
+    for cls in range(num_classes):
+        c = counts.get(cls, 1)
+        class_weights[cls] = 1.0 / c if c > 0 else 1.0
+    sample_weights = []
+    for _, row in dataframe.iterrows():
+        cls = int(row["diagnosis"])
+        sample_weights.append(class_weights.get(cls, 1.0))
+    generator = None
+    if seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(seed)
+    return WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True,
+        generator=generator,
+    )

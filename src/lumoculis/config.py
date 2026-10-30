@@ -41,6 +41,7 @@ class Config:
     label_smoothing: float = 0.0
     augment: str = "light"
     threshold_referable: float = 0.5
+    use_weighted_sampler: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
