@@ -12,7 +12,8 @@ Lumoculis is a research prototype for 5-class diabetic retinopathy (DR) grading 
 ## Dataset and split methodology
 - Historical validation IDs (730) and their exact-duplicate groups were excluded.
 - Eligible population: 2,932 images.
-- New split: train 2,061, validation 439, test 432 (seed 42, duplicate-aware, 70/15/15).
+- New split: train 2,061, validation 439, test 432 (seed 42, duplicate-aware, 70/15/15). These counts describe the newly generated duplicate-aware split only.
+- The existing Experiment C checkpoint was evaluated on the holdout test set; these counts do not mean the checkpoint was retrained on the new split.
 - Original labels were preserved; conflicting-label groups are reported, not relabeled.
 - Train, validation, test, and excluded ID sets are pairwise disjoint; no exact-duplicate group crosses split boundaries.
 
