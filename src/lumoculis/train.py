@@ -69,10 +69,13 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
 
 
-def _dampened_class_weight_tensor(train_df, num_classes: int, device: torch.device) -> torch.Tensor:
-    """Build a float32 class-weight vector (sqrt inverse frequency) for CrossEntropyLoss."""
+def _class_weight_tensor(
+    train_df, num_classes: int, device: torch.device, strength: float = 1.0
+) -> torch.Tensor:
+    """Build a float32 class-weight vector, interpolating between uniform (strength=0) and dampened inverse-frequency (strength=1)."""
     _counts, weights = class_counts_and_weights(train_df, dampen=True)
     weight_list = [float(weights.get(i, 1.0)) for i in range(num_classes)]
+    weight_list = [(1.0 - strength) * 1.0 + strength * w for w in weight_list]
     return torch.tensor(weight_list, dtype=torch.float32, device=device)
 
 
@@ -333,7 +336,9 @@ def _setup_training(
     model = build_model(config.model_name, config.num_classes, pretrained=pretrained).to(device)
     print(f"Trainable parameters: {count_parameters(model):,}")
 
-    class_weights = _dampened_class_weight_tensor(train_ds.df, config.num_classes, device)
+    class_weights = _class_weight_tensor(
+        train_ds.df, config.num_classes, device, getattr(config, "class_weight_strength", 1.0)
+    )
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=config.lr, weight_decay=config.weight_decay
@@ -512,7 +517,11 @@ def run_training(  # noqa: PLR0913, PLR0915
             train_loss = float(
                 train_result["total_loss"].item() / max(train_result["n_batches"], 1)
             )
-            val_loss = float(val_result["avg_loss"].item()) if isinstance(val_result["avg_loss"], torch.Tensor) else float(val_result["avg_loss"])
+            val_loss = (
+                float(val_result["avg_loss"].item())
+                if isinstance(val_result["avg_loss"], torch.Tensor)
+                else float(val_result["avg_loss"])
+            )
 
             print(
                 f"epoch {epoch + 1}/{epochs} "

@@ -1,0 +1,23 @@
+# Experiment D: weighted sampling with reduced class-weighted loss strength
+image_size: 384
+batch_size: 2
+epochs: 3
+lr: 0.0003
+model_name: efficientnet_b0
+seed: 42
+
+data_dir: data/raw
+processed_dir: data/processed
+checkpoint_dir: checkpoints
+mlflow_dir: mlruns
+mlflow_experiment: lumoculis
+
+num_classes: 5
+num_workers: 0
+pin_memory: false
+weight_decay: 0.05
+label_smoothing: 0.0
+augment: light
+threshold_referable: 0.5
+use_weighted_sampler: true
+class_weight_strength: 0.75

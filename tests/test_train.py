@@ -89,3 +89,18 @@ def test_smoke_training_saves_checkpoint_and_preds(tmp_path) -> None:
     assert data["y_prob"].ndim == 2  # noqa: PLR2004
     assert data["y_prob"].shape[1] == NUM_CLASSES  # 5 classes
     assert len(data["val_ids"]) == data["y_true"].shape[0] == data["y_prob"].shape[0]
+
+
+def test_class_weight_strength_interpolation() -> None:
+    import pandas as pd
+    import torch
+
+    from lumoculis.train import _class_weight_tensor
+
+    df = pd.DataFrame({"diagnosis": [0, 0, 0, 1, 2, 3, 4]})
+    w0 = _class_weight_tensor(df, 5, torch.device("cpu"), strength=0.0)
+    w1 = _class_weight_tensor(df, 5, torch.device("cpu"), strength=1.0)
+    assert torch.allclose(w0, torch.ones(5))
+    mid = _class_weight_tensor(df, 5, torch.device("cpu"), strength=0.5)
+    expected = 0.5 * torch.ones(5) + 0.5 * w1
+    assert torch.allclose(mid, expected)

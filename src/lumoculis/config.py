@@ -42,6 +42,7 @@ class Config:
     augment: str = "light"
     threshold_referable: float = 0.5
     use_weighted_sampler: bool = False
+    class_weight_strength: float = 1.0
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
