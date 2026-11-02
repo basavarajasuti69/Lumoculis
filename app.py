@@ -363,6 +363,8 @@ def _render_prediction_results(ctx: PredictionContext) -> dict:
         "quality": (ctx.quality_result.to_dict() if ctx.quality_result is not None else None),
         "model_checkpoint": ctx.effective_checkpoint,
         "model_architecture": (ctx.metadata["config"]["model_name"] if ctx.metadata else "unknown"),
+        "image_width": ctx.image_width,
+        "image_height": ctx.image_height,
         "disclaimer": RESEARCH_DISCLAIMER,
     }
     return report
@@ -475,18 +477,22 @@ def main() -> None:  # noqa: PLR0911,PLR0912,PLR0915
     referable = bool(predicted_class >= REFERRABLE_THRESHOLD_GRADE)
     referable_prob = float(probs_for_pred[REFERRABLE_THRESHOLD_GRADE:].sum())
 
-    report = _render_prediction_results(
+    context = PredictionContext(
         raw_probs=raw_probs,
         calibrated_probs=calibrated_probs,
         temperature=temperature,
         metadata=metadata,
-        referable_prob=referable_prob,
         predicted_class=predicted_class,
         referable=referable,
+        referable_prob=referable_prob,
         quality_result=quality_result,
         quality_blocked=quality_blocked,
         effective_checkpoint=effective_checkpoint,
+        image_width=width,
+        image_height=height,
     )
+
+    report = _render_prediction_results(context)
 
     if st.checkbox("Generate Grad-CAM visualization", value=False, key="gradcam_checkbox"):
         with tempfile.NamedTemporaryFile(
@@ -503,8 +509,6 @@ def main() -> None:  # noqa: PLR0911,PLR0912,PLR0915
         else:
             st.warning("Grad-CAM visualization could not be generated for this model.")
 
-    report["image_width"] = width
-    report["image_height"] = height
     st.download_button(
         label="Download prediction report (JSON)",
         data=json.dumps(report, indent=2),
