@@ -396,6 +396,7 @@ def _inject_css() -> None:
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         :root {
             --lumo-bg: #181818;
             --lumo-surface: #303030;
@@ -407,15 +408,23 @@ def _inject_css() -> None:
             --lumo-border: #303030;
             --lumo-info: #4C98B9;
         }
+        html, body, [class*="css"] { font-family: 'Inter', -apple-system, system-ui, sans-serif; }
         .stApp { background: var(--lumo-bg); color: var(--lumo-text); }
-        .block-container { max-width: 1280px; padding-top: 2rem; }
-        h1, h2, h3 { letter-spacing: -0.02em; }
-        .lumo-hero { padding: 6rem 0 4rem; }
-        .lumo-eyebrow { text-transform: uppercase; letter-spacing: 1.1px; color: var(--lumo-muted); font-size: 0.75rem; }
-        .lumo-hero-title { font-size: clamp(2.5rem, 6vw, 5rem); font-weight: 500; line-height: 1.05; }
-        .lumo-card { border: 1px solid var(--lumo-border); padding: 1.5rem; background: var(--lumo-surface); }
-        .stButton>button { border-radius: 0; text-transform: uppercase; letter-spacing: 1.4px; background: var(--lumo-accent); color: #fff; min-height: 48px; }
-        .stButton>button:hover { background: var(--lumo-accent-active); }
+        .block-container { max-width: 1280px; padding-top: 2rem; padding-bottom: 4rem; }
+        h1, h2, h3 { letter-spacing: -0.02em; font-weight: 500; }
+        .lumo-hero { padding: 6rem 0 4rem; border-bottom: 1px solid var(--lumo-border); }
+        .lumo-eyebrow { text-transform: uppercase; letter-spacing: 1.1px; color: var(--lumo-muted); font-size: 0.75rem; margin-bottom: 1rem; }
+        .lumo-hero-title { font-size: clamp(2.5rem, 6vw, 5rem); font-weight: 500; line-height: 1.05; margin-bottom: 1rem; }
+        .lumo-hero-copy { color: var(--lumo-muted); max-width: 720px; font-size: 1.1rem; line-height: 1.6; }
+        .lumo-badge { display: inline-block; border: 1px solid var(--lumo-border); padding: 4px 10px; font-size: 0.75rem; letter-spacing: 1.1px; text-transform: uppercase; margin-top: 1rem; }
+        .lumo-card { border: 1px solid var(--lumo-border); padding: 1.5rem; background: var(--lumo-surface); height: 100%; }
+        .lumo-card strong { display: block; margin-bottom: 0.5rem; }
+        .stButton>button { border-radius: 0; text-transform: uppercase; letter-spacing: 1.4px; background: var(--lumo-accent); color: #fff; min-height: 48px; border: 1px solid var(--lumo-accent); }
+        .stButton>button:hover { background: var(--lumo-accent-active); border-color: var(--lumo-accent-active); }
+        @media (max-width: 640px) {
+            .lumo-hero { padding: 3rem 0 2rem; }
+            .lumo-hero-title { font-size: 2.25rem; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -423,8 +432,7 @@ def _inject_css() -> None:
 
 
 def _render_overview() -> None:
-    st.markdown('<div class="lumo-hero"><div class="lumo-eyebrow">AI-POWERED RETINAL IMAGE ANALYSIS</div><h1 class="lumo-hero-title">See Retinal Images Through the Lens of AI.</h1><p>Explore a deep-learning research prototype that classifies retinal fundus images into five diabetic retinopathy severity grades.</p></div>', unsafe_allow_html=True)
-    st.markdown('<span style="border:1px solid #303030;padding:4px 8px;font-size:0.75rem;">RESEARCH PROTOTYPE</span>', unsafe_allow_html=True)
+    st.markdown('<div class="lumo-hero"><div class="lumo-eyebrow">AI-POWERED RETINAL IMAGE ANALYSIS</div><h1 class="lumo-hero-title">See Retinal Images Through the Lens of AI.</h1><p class="lumo-hero-copy">Explore a deep-learning research prototype that classifies retinal fundus images into five diabetic retinopathy severity grades.</p><div class="lumo-badge">Research Prototype</div></div>', unsafe_allow_html=True)
     st.markdown("### Technical highlights")
     c1, c2, c3, c4 = st.columns(4)
     c1.markdown('<div class="lumo-card"><strong>FIVE-CLASS CLASSIFICATION</strong><br>Predicts a diabetic retinopathy severity grade from 0 to 4.</div>', unsafe_allow_html=True)
@@ -471,8 +479,6 @@ def _run_analysis_app(config: dict) -> None:  # noqa: PLR0911, PLR0912, PLR0915
     st.caption("AI-assisted diabetic retinopathy screening support (research prototype)")
 
     _render_disclaimer()
-    config = _render_sidebar()
-    st.session_state["device"] = config["device"]
 
     st.subheader("Upload a retinal fundus image")
     uploaded_file = st.file_uploader(
