@@ -398,30 +398,30 @@ def _inject_css() -> None:
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         :root {
-            --lumo-bg: #F7F8FA;
-            --lumo-surface: #FFFFFF;
-            --lumo-dark: #101B19;
-            --lumo-dark-surface: #1A2825;
-            --lumo-accent: #167D68;
-            --lumo-accent-active: #126653;
-            --lumo-text: #17211F;
-            --lumo-muted: #69736F;
-            --lumo-border: #E4E9E6;
+            --lumo-bg: #181818;
+            --lumo-surface: #303030;
+            --lumo-accent: #DA291C;
+            --lumo-accent-active: #B01E0A;
+            --lumo-accent-hover: #9D2211;
+            --lumo-text: #FFFFFF;
+            --lumo-muted: #969696;
+            --lumo-dim: #666666;
+            --lumo-border: #303030;
             --lumo-info: #4C98B9;
         }
         html, body, [class*="css"] { font-family: 'Inter', -apple-system, system-ui, sans-serif; color: var(--lumo-text); }
         .stApp { background: var(--lumo-bg); color: var(--lumo-text); }
         .block-container { max-width: 1280px; padding-top: 2rem; padding-bottom: 4rem; }
-        h1, h2, h3 { letter-spacing: -0.02em; font-weight: 600; }
-        .lumo-hero { padding: 5rem 0 3rem; }
-        .lumo-eyebrow { text-transform: uppercase; letter-spacing: 1.1px; color: var(--lumo-accent); font-size: 0.75rem; margin-bottom: 1rem; font-weight: 600; }
-        .lumo-hero-title { font-size: clamp(2.5rem, 6vw, 4rem); font-weight: 700; line-height: 1.05; margin-bottom: 1rem; }
+        h1, h2, h3 { letter-spacing: -0.02em; font-weight: 500; }
+        .lumo-hero { padding: 6rem 0 4rem; border-bottom: 1px solid var(--lumo-border); }
+        .lumo-eyebrow { text-transform: uppercase; letter-spacing: 1.1px; color: var(--lumo-muted); font-size: 0.75rem; margin-bottom: 1rem; }
+        .lumo-hero-title { font-size: clamp(2.5rem, 6vw, 5rem); font-weight: 500; line-height: 1.05; margin-bottom: 1rem; }
         .lumo-hero-copy { color: var(--lumo-muted); max-width: 720px; font-size: 1.1rem; line-height: 1.6; }
         .lumo-badge { display: inline-block; border: 1px solid var(--lumo-border); padding: 4px 10px; font-size: 0.75rem; letter-spacing: 1.1px; text-transform: uppercase; margin-top: 1rem; color: var(--lumo-accent); }
-        .lumo-card { border: 1px solid var(--lumo-border); padding: 1.5rem; background: var(--lumo-surface); height: 100%; border-radius: 8px; }
+        .lumo-card { border: 1px solid var(--lumo-border); padding: 1.5rem; background: var(--lumo-surface); height: 100%; border-radius: 0; }
         .lumo-card strong { display: block; margin-bottom: 0.5rem; }
-        .stButton>button { border-radius: 6px; text-transform: uppercase; letter-spacing: 1.2px; background: var(--lumo-accent); color: #fff; min-height: 48px; border: 1px solid var(--lumo-accent); }
-        .stButton>button:hover { background: var(--lumo-accent-active); border-color: var(--lumo-accent-active); }
+        .stButton>button { border-radius: 0; text-transform: uppercase; letter-spacing: 1.4px; background: var(--lumo-accent); color: #fff; min-height: 48px; border: 1px solid var(--lumo-accent); }
+        .stButton>button:hover { background: var(--lumo-accent-hover); border-color: var(--lumo-accent-hover); }
         @media (max-width: 640px) {
             .lumo-hero { padding: 3rem 0 2rem; }
             .lumo-hero-title { font-size: 2.25rem; }
