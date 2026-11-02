@@ -390,7 +390,77 @@ def _handle_upload(uploaded_file, max_upload_mb: float):
     return img
 
 
-def main() -> None:  # noqa: PLR0911,PLR0912,PLR0915
+
+
+def _inject_css() -> None:
+    st.markdown(
+        """
+        <style>
+        :root {
+            --lumo-bg: #181818;
+            --lumo-surface: #303030;
+            --lumo-accent: #DA291C;
+            --lumo-accent-active: #B01E0A;
+            --lumo-text: #FFFFFF;
+            --lumo-muted: #969696;
+            --lumo-dim: #666666;
+            --lumo-border: #303030;
+            --lumo-info: #4C98B9;
+        }
+        .stApp { background: var(--lumo-bg); color: var(--lumo-text); }
+        .block-container { max-width: 1280px; padding-top: 2rem; }
+        h1, h2, h3 { letter-spacing: -0.02em; }
+        .lumo-hero { padding: 6rem 0 4rem; }
+        .lumo-eyebrow { text-transform: uppercase; letter-spacing: 1.1px; color: var(--lumo-muted); font-size: 0.75rem; }
+        .lumo-hero-title { font-size: clamp(2.5rem, 6vw, 5rem); font-weight: 500; line-height: 1.05; }
+        .lumo-card { border: 1px solid var(--lumo-border); padding: 1.5rem; background: var(--lumo-surface); }
+        .stButton>button { border-radius: 0; text-transform: uppercase; letter-spacing: 1.4px; background: var(--lumo-accent); color: #fff; min-height: 48px; }
+        .stButton>button:hover { background: var(--lumo-accent-active); }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_overview() -> None:
+    st.markdown('<div class="lumo-hero"><div class="lumo-eyebrow">AI-POWERED RETINAL IMAGE ANALYSIS</div><h1 class="lumo-hero-title">See Retinal Images Through the Lens of AI.</h1><p>Explore a deep-learning research prototype that classifies retinal fundus images into five diabetic retinopathy severity grades.</p></div>', unsafe_allow_html=True)
+    st.markdown('<span style="border:1px solid #303030;padding:4px 8px;font-size:0.75rem;">RESEARCH PROTOTYPE</span>', unsafe_allow_html=True)
+    st.markdown("### Technical highlights")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.markdown('<div class="lumo-card"><strong>FIVE-CLASS CLASSIFICATION</strong><br>Predicts a diabetic retinopathy severity grade from 0 to 4.</div>', unsafe_allow_html=True)
+    c2.markdown('<div class="lumo-card"><strong>EXPLAINABLE AI</strong><br>Displays Grad-CAM visualizations when supported.</div>', unsafe_allow_html=True)
+    c3.markdown('<div class="lumo-card"><strong>IMAGE QUALITY</strong><br>Provides heuristic image-quality assessment when supported.</div>', unsafe_allow_html=True)
+    c4.markdown('<div class="lumo-card"><strong>MODEL EVALUATION</strong><br>Presents available research metrics and evaluation information.</div>', unsafe_allow_html=True)
+    st.markdown("### How it works")
+    st.markdown("01 — UPLOAD: Select a supported retinal fundus image.")
+    st.markdown("02 — ANALYZE: Run the existing deep-learning inference pipeline.")
+    st.markdown("03 — REVIEW: Inspect the predicted grade, probability distribution, and supported visualizations.")
+    st.markdown("### Responsible AI")
+    st.warning("Lumoculis is an experimental research prototype. It is not clinically validated and must not replace professional medical assessment.")
+
+
+def _render_model_info() -> None:
+    st.subheader("Model information")
+    st.write("Architecture: EfficientNet-B0")
+    st.write("Framework: PyTorch")
+    st.write("Dataset: APTOS 2019")
+    st.write("Output classes: 5 (grades 0-4)")
+    st.write("Referable DR threshold: grade >= 2")
+    st.write("Grad-CAM: supported")
+    st.write("Probability calibration: supported")
+    st.write("Known limitations: research prototype; not clinically validated.")
+
+
+def _render_about() -> None:
+    st.subheader("About")
+    st.write("Lumoculis is a research prototype for AI-assisted diabetic retinopathy screening support.")
+    st.write(RESEARCH_DISCLAIMER)
+    st.caption("© 2026 Lumoculis. Research prototype, not a medical device.")
+
+
+def _run_analysis_app(config: dict) -> None:  # noqa: PLR0911, PLR0912, PLR0915
+    """Run the existing image analysis workflow."""
+
     st.set_page_config(
         page_title="Lumoculis - DR Screening Support",
         page_icon="👁️",
@@ -515,6 +585,27 @@ def main() -> None:  # noqa: PLR0911,PLR0912,PLR0915
         file_name="lumoculis_prediction_report.json",
         mime="application/json",
     )
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="Lumoculis - DR Screening Support",
+        page_icon="👁️",
+        layout="wide",
+    )
+    _inject_css()
+
+    tabs = st.tabs(["Overview", "Analyze Image", "Model Information", "About"])
+    with tabs[0]:
+        _render_overview()
+    with tabs[1]:
+        config = _render_sidebar()
+        st.session_state["device"] = config["device"]
+        _run_analysis_app(config)
+    with tabs[2]:
+        _render_model_info()
+    with tabs[3]:
+        _render_about()
 
 
 if __name__ == "__main__":
