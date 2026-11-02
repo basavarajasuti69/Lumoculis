@@ -127,7 +127,7 @@ def _load_temperature_cached(
 def _decode_uploaded(uploaded_file) -> np.ndarray | None:
     """Decode an uploaded Streamlit file into a BGR numpy array."""
     try:
-        file_bytes = np.asarray(uploaded_file.read(), dtype=np.uint8)
+        file_bytes = np.frombuffer(uploaded_file.getvalue(), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
         return img
     except Exception:
