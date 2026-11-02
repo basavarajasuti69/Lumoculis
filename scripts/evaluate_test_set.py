@@ -1,4 +1,5 @@
 import argparse
+import pathlib
 
 from lumoculis.config import Config
 from lumoculis.eval_test import run_test_evaluation
@@ -15,8 +16,6 @@ def main():
     args = parser.parse_args()
 
     config = Config.from_yaml(args.config)
-    csv_path = Path(config.data_dir) / "train.csv" if False else None
-    import pathlib
     csv_path = pathlib.Path(config.data_dir) / "train.csv"
 
     result = run_test_evaluation(

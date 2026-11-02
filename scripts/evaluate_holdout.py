@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from lumoculis.config import Config
 from lumoculis.eval_test import run_holdout_evaluation
@@ -39,7 +40,6 @@ def main():
     csv_path = Path(config.data_dir) / "train.csv"
     if not csv_path.exists():
         raise FileNotFoundError(f"Dataset CSV not found: {csv_path}")
-    import pandas as pd
     df = pd.read_csv(csv_path)
     available_ids = set(df["id_code"].astype(str))
     missing = [x for x in historical_ids if x not in available_ids]

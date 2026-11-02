@@ -104,7 +104,7 @@ def _time_getitem_manual(id_codes, transform, label_map) -> dict[str, float]:
 
 def _time_dataloader(dataset, n_batches: int) -> dict[str, float]:
     """Time a DataLoader end-to-end including __getitem__ blocking time."""
-    from torch.utils.data import DataLoader
+    from torch.utils.data import DataLoader  # noqa: PLC0415
 
     loader = DataLoader(
         dataset,
@@ -137,7 +137,7 @@ def main() -> int:
     # Pick the first N_SAMPLES images from a CSV if available, else scan dir.
     csv_path = Path("data/raw/train.csv")
     if csv_path.exists():
-        import pandas as pd
+        import pandas as pd  # noqa: PLC0415
 
         df = pd.read_csv(csv_path)
         id_codes = [str(k) for k in df["id_code"].head(N_SAMPLES)]
@@ -187,7 +187,7 @@ def main() -> int:
         num_workers=0,
     )
 
-    from lumoculis.data import train_val_split
+    from lumoculis.data import train_val_split  # noqa: PLC0415
 
     train_ds, val_ds, _ = train_val_split(
         csv_path if csv_path.exists() else PROCESSED_DIR / "train.csv",

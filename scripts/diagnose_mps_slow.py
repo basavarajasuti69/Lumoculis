@@ -147,8 +147,8 @@ def main() -> int:  # noqa: PLR0915
     if device.type == "mps":
         # Check if previous tests were reasonable
         if (
-            results.get("small_nn_first", (999,))[0] < 60
-            and results.get("matmul_mps_512", (999,))[0] < 30
+            results.get("small_nn_first", (999,))[0] < 60  # noqa: PLR2004
+            and results.get("matmul_mps_512", (999,))[0] < 30  # noqa: PLR2004
         ):
             from lumoculis.model import build_model  # noqa: PLC0415
 

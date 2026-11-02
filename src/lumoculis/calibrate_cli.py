@@ -25,6 +25,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import mlflow
 import numpy as np
 
 from lumoculis.calibration import (
@@ -374,7 +375,6 @@ def _log_mlflow(
     fitted: bool,
 ) -> None:
     """Log calibration results to MLflow."""
-    import mlflow  # noqa: PLC0415
 
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(experiment)

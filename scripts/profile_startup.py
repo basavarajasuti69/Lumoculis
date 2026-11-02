@@ -21,7 +21,7 @@ from lumoculis.data import train_val_split
 from lumoculis.train import _build_dataloaders, _setup_training, pick_device, seed_everything
 
 
-def main() -> int:
+def main() -> int:  # noqa: PLR0912, PLR0915
     timings = {}
     t_total_start = time.perf_counter()
 
@@ -34,7 +34,7 @@ def main() -> int:
     seed_everything(config.seed)
     try:
         mlflow.end_run()
-    except Exception:
+    except Exception:  # noqa: S110
         pass
     timings["device_seed_mlflow_init_s"] = time.perf_counter() - t0
 
