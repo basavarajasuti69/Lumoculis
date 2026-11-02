@@ -9,9 +9,11 @@ import os
 
 import cv2
 import numpy as np
+import pandas as pd
+import torch
 
 from lumoculis.config import Config
-from lumoculis.train import run_training
+from lumoculis.train import _class_weight_tensor, run_training
 
 NUM_CLASSES = 5
 
@@ -92,10 +94,6 @@ def test_smoke_training_saves_checkpoint_and_preds(tmp_path) -> None:
 
 
 def test_class_weight_strength_interpolation() -> None:
-    import pandas as pd
-    import torch
-
-    from lumoculis.train import _class_weight_tensor
 
     df = pd.DataFrame({"diagnosis": [0, 0, 0, 1, 2, 3, 4]})
     w0 = _class_weight_tensor(df, 5, torch.device("cpu"), strength=0.0)

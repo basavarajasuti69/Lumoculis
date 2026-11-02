@@ -34,4 +34,4 @@ def test_validation_loss_not_divided_twice():
     res = validate(model, loader, criterion, torch.device("cpu"), 5, val_ids=None, max_batches=4)
     avg = res["avg_loss"].item() if hasattr(res["avg_loss"], "item") else float(res["avg_loss"])
     assert avg > 0
-    assert avg > 0.001
+    assert avg > 0.001  # noqa: PLR2004

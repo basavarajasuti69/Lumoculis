@@ -16,6 +16,8 @@ from lumoculis.data import (
     class_counts_and_weights,
     find_duplicate_groups,
     train_val_split,
+    train_val_test_split,
+    train_val_test_split_preserving_validation,
 )
 
 EXPECTED_TRAIN = 32
@@ -288,3 +290,189 @@ def test_representative_label_conflicting():
     assert _representative_label([1, 1, 2]) == 1
     assert _representative_label([0, 1]) == -1  # tie -> conflicting
     assert _representative_label([0, 1, 2]) == -1  # all different -> conflicting
+
+
+
+def test_train_val_test_split_reproducible(tmp_path):
+    """The same seed must produce the same three splits."""
+    id_codes = [f"img{i}" for i in range(50)]
+    labels = [i % 5 for i in range(50)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes)
+
+    first = train_val_test_split(
+        csv_path, processed_dir, _config(seed=42)
+    )
+    second = train_val_test_split(
+        csv_path, processed_dir, _config(seed=42)
+    )
+
+    for first_ds, second_ds in zip(first[:3], second[:3], strict=True):
+        first_ids = list(first_ds.df["id_code"].astype(str))
+        second_ids = list(second_ds.df["id_code"].astype(str))
+        assert first_ids == second_ids
+
+
+def test_train_val_test_split_has_disjoint_ids(tmp_path):
+    """No image ID may appear in more than one split."""
+    id_codes = [f"img{i}" for i in range(50)]
+    labels = [i % 5 for i in range(50)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes)
+
+    train_ds, val_ds, test_ds, report = train_val_test_split(
+        csv_path, processed_dir, _config(seed=42)
+    )
+
+    train_ids = set(train_ds.df["id_code"].astype(str))
+    val_ids = set(val_ds.df["id_code"].astype(str))
+    test_ids = set(test_ds.df["id_code"].astype(str))
+
+    assert train_ids
+    assert val_ids
+    assert test_ids
+    assert not train_ids & val_ids
+    assert not train_ids & test_ids
+    assert not val_ids & test_ids
+    assert len(train_ids | val_ids | test_ids) == len(id_codes)
+    assert report["cross_split_groups"] == []
+
+
+def test_train_val_test_split_keeps_exact_duplicates_together(tmp_path):
+    """Exact duplicate images must stay within a single split."""
+    id_codes = [f"img{i}" for i in range(50)]
+    labels = [i % 5 for i in range(50)]
+
+    # img0 and img5 both belong to class 0 and have identical image content.
+    duplicate_of = {"img5": "img0"}
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(
+        tmp_path, id_codes, duplicate_of=duplicate_of
+    )
+
+    train_ds, val_ds, test_ds, report = train_val_test_split(
+        csv_path, processed_dir, _config(seed=42)
+    )
+
+    split_by_id = {}
+    for split_name, dataset in (
+        ("train", train_ds),
+        ("val", val_ds),
+        ("test", test_ds),
+    ):
+        for image_id in dataset.df["id_code"].astype(str):
+            split_by_id[image_id] = split_name
+
+    assert split_by_id["img0"] == split_by_id["img5"]
+    assert report["cross_split_groups"] == []
+
+
+def test_preserving_validation_keeps_historical_val(tmp_path):
+    id_codes = [f"img{i}" for i in range(50)]
+    labels = [i % 5 for i in range(50)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes)
+
+    hist_train_ds, hist_val_ds, _ = train_val_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.2
+    )
+    new_train_ds, new_val_ds, new_test_ds, report = (
+        train_val_test_split_preserving_validation(
+            csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.15
+        )
+    )
+
+    hist_val_ids = set(hist_val_ds.df["id_code"].astype(str))
+    new_val_ids = set(new_val_ds.df["id_code"].astype(str))
+    new_train_ids = set(new_train_ds.df["id_code"].astype(str))
+    new_test_ids = set(new_test_ds.df["id_code"].astype(str))
+    hist_train_ids = set(hist_train_ds.df["id_code"].astype(str))
+
+    assert new_val_ids == hist_val_ids
+    assert new_test_ids <= hist_train_ids
+    assert not (new_train_ids & new_val_ids)
+    assert not (new_train_ids & new_test_ids)
+    assert not (new_val_ids & new_test_ids)
+    assert new_train_ids | new_val_ids | new_test_ids == set(id_codes)
+
+
+def test_three_way_split_all_ids_assigned(tmp_path):
+    id_codes = [f"img{i}" for i in range(60)]
+    labels = [i % 5 for i in range(60)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes)
+
+    train_ds, val_ds, test_ds, report = train_val_test_split(
+        csv_path, processed_dir, _config(seed=7), val_size=0.2, test_size=0.2
+    )
+    train_ids = set(train_ds.df["id_code"].astype(str))
+    val_ids = set(val_ds.df["id_code"].astype(str))
+    test_ids = set(test_ds.df["id_code"].astype(str))
+
+    assert train_ids | val_ids | test_ids == set(id_codes)
+    assert not (train_ids & val_ids)
+    assert not (train_ids & test_ids)
+    assert not (val_ids & test_ids)
+    assert report["cross_split_groups"] == []
+
+
+def test_three_way_rare_class_allocation(tmp_path):
+    # Class 0 has 3 groups, class 1 has 2 groups, class 2 has 1 group.
+    id_codes = []
+    labels = []
+    # three singleton-ish groups for class 0 by making duplicates
+    duplicate_of = {}
+    base = 0
+    for cls in range(3):
+        for g in range([3, 2, 1][cls]):
+            idx = len(id_codes)
+            code = f"img{idx}"
+            id_codes.append(code)
+            labels.append(cls)
+            if g > 0:
+                duplicate_of[code] = id_codes[base]
+        base = len(id_codes)
+    # pad with enough unique images for other classes
+    for i in range(20):
+        id_codes.append(f"img{len(id_codes)}")
+        labels.append((i % 2) + 3)
+
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
+
+    train_ds, val_ds, test_ds, report = train_val_test_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.2
+    )
+    train_ids = set(train_ds.df["id_code"].astype(str))
+    val_ids = set(val_ds.df["id_code"].astype(str))
+    test_ids = set(test_ds.df["id_code"].astype(str))
+    assert train_ids | val_ids | test_ids == set(id_codes)
+    assert not (train_ids & val_ids)
+    assert not (train_ids & test_ids)
+    assert not (val_ids & test_ids)
+
+
+def test_three_way_conflicting_labels_reported(tmp_path):
+    id_codes = [f"img{i}" for i in range(20)]
+    duplicate_of = {"img1": "img0"}
+    labels = [0, 1] + [i % 5 for i in range(2, 20)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
+
+    train_ds, val_ds, test_ds, report = train_val_test_split(
+        csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.2
+    )
+    assert any(set(ids) == {"img0", "img1"} for _, ids in report["conflicting_groups"])
+
+
+def test_three_way_different_seed_changes_split(tmp_path):
+    id_codes = [f"img{i}" for i in range(60)]
+    labels = [i % 5 for i in range(60)]
+    csv_path = _make_csv(tmp_path, id_codes, labels)
+    processed_dir = _make_synthetic_images(tmp_path, id_codes)
+
+    a = train_val_test_split(csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.2)
+    b = train_val_test_split(csv_path, processed_dir, _config(seed=7), val_size=0.2, test_size=0.2)
+    a_ids = [list(ds.df["id_code"].astype(str)) for ds in a[:3]]
+    b_ids = [list(ds.df["id_code"].astype(str)) for ds in b[:3]]
+    assert a_ids != b_ids

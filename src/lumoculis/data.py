@@ -188,6 +188,146 @@ def _representative_label(labels: list[int]) -> int:
         return -1
     return modes[0]
 
+def train_val_test_split_preserving_validation(
+    csv_path: str | Path,
+    processed_dir: str | Path,
+    config: Config,
+    test_size: float = 0.15,
+    val_size: float = DEFAULT_VAL_SIZE,
+) -> tuple[LumoculisDataset, LumoculisDataset, LumoculisDataset, dict]:
+    """Create an independent test set without changing historical validation.
+
+    First reproduce the existing train/validation split. Then select test
+    images exclusively from the original training partition. Exact duplicate
+    images remain together. APTOS has no patient IDs, so patient-level
+    independence cannot be guaranteed.
+    """
+    if not 0 < test_size < 1:
+        raise ValueError("test_size must be between 0 and 1.")
+    if not 0 < val_size < 1:
+        raise ValueError("val_size must be between 0 and 1.")
+    if test_size + val_size >= 1:
+        raise ValueError("test_size + val_size must be less than 1.")
+
+    # Reproduce the established split used in previous experiments.
+    original_train_ds, val_ds, dup_report = train_val_split(
+        csv_path,
+        processed_dir,
+        config,
+        val_size=val_size,
+    )
+
+    original_train_df = original_train_ds.df.copy()
+    original_train_ids = set(
+        original_train_df["id_code"].astype(str)
+    )
+    historical_val_ids = set(
+        val_ds.df["id_code"].astype(str)
+    )
+
+    # Convert the desired overall test proportion into a proportion of
+    # the original training partition.
+    test_fraction_of_train = test_size / (1.0 - val_size)
+
+    id_to_label = {
+        str(row.id_code): int(row.diagnosis)
+        for row in original_train_df.itertuples(index=False)
+    }
+
+    # Group exact duplicates within the original training partition only.
+    hash_groups = find_duplicate_groups(
+        processed_dir,
+        list(original_train_ids),
+    )
+
+    groups_by_class = defaultdict(list)
+
+    for _image_hash, ids in hash_groups.items():
+        labels = [id_to_label[image_id] for image_id in ids]
+        representative_label = _representative_label(labels)
+        groups_by_class[representative_label].append(ids)
+
+    rng = random.Random(config.seed + 1)  # noqa: S311
+    test_ids = set()
+
+    # Select test groups class by class while leaving training examples
+    # in every class that has at least two distinct groups.
+    for groups in groups_by_class.values():
+        rng.shuffle(groups)
+        count = len(groups)
+
+        if count <= 1:
+            continue
+
+        n_test = max(1, round(count * test_fraction_of_train))
+        n_test = min(n_test, count - 1)
+
+        for group in groups[:n_test]:
+            test_ids.update(group)
+
+    train_ids = original_train_ids - test_ids
+
+    if not train_ids or not test_ids:
+        raise RuntimeError("The new training or test split is empty.")
+
+    if train_ids & test_ids:
+        raise RuntimeError("Training and test image IDs overlap.")
+
+    if test_ids & historical_val_ids:
+        raise RuntimeError("Test set overlaps historical validation.")
+
+    # Verify that no exact duplicate group crosses the new boundary.
+    for ids in hash_groups.values():
+        group_ids = set(ids)
+        if group_ids & train_ids and group_ids & test_ids:
+            raise RuntimeError(
+                f"Exact duplicate group crosses train/test: {ids}"
+            )
+
+    train_df = (
+        original_train_df[
+            original_train_df["id_code"].astype(str).isin(train_ids)
+        ]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    test_df = (
+        original_train_df[
+            original_train_df["id_code"].astype(str).isin(test_ids)
+        ]
+        .copy()
+        .reset_index(drop=True)
+    )
+
+    train_ds = LumoculisDataset(
+        train_df,
+        processed_dir,
+        config.image_size,
+        transform=train_transforms(config.augment),
+    )
+
+    # val_ds is deliberately returned unchanged.
+    test_ds = LumoculisDataset(
+        test_df,
+        processed_dir,
+        config.image_size,
+        transform=val_transforms(),
+    )
+
+    report = {
+        **dup_report,
+        "n_original_train_images": len(original_train_df),
+        "n_historical_val_images": len(val_ds),
+        "n_new_train_images": len(train_ds),
+        "n_test_images": len(test_ds),
+        "requested_test_fraction_of_dataset": test_size,
+        "actual_test_fraction_of_dataset": len(test_ds)
+        / (len(original_train_df) + len(val_ds)),
+        "test_fraction_of_original_train": test_fraction_of_train,
+    }
+
+    return train_ds, val_ds, test_ds, report
 
 def train_val_split(
     csv_path: str | Path,
@@ -292,6 +432,141 @@ def train_val_split(
     val_ds = LumoculisDataset(val_df, processed_dir, config.image_size, transform=val_transforms())
 
     return train_ds, val_ds, dup_report
+
+
+
+def train_val_test_split(  # noqa: PLR0912, PLR0915
+    csv_path: str | Path,
+    processed_dir: str | Path,
+    config: Config,
+    val_size: float = 0.15,
+    test_size: float = 0.15,
+) -> tuple[LumoculisDataset, LumoculisDataset, LumoculisDataset, dict]:
+    """Create reproducible, stratified, duplicate-aware data splits.
+
+    Exact duplicate groups stay in one split. APTOS does not provide patient
+    IDs, so patient-level independence cannot be guaranteed.
+    """
+    if not 0 < val_size < 1:
+        raise ValueError("val_size must be between 0 and 1.")
+    if not 0 < test_size < 1:
+        raise ValueError("test_size must be between 0 and 1.")
+    if val_size + test_size >= 1:
+        raise ValueError("val_size + test_size must be less than 1.")
+
+    df = pd.read_csv(csv_path)
+    id_to_label = {
+        str(k): int(v)
+        for k, v in zip(df["id_code"], df["diagnosis"], strict=True)
+    }
+
+    hash_groups = find_duplicate_groups(
+        processed_dir, list(id_to_label.keys())
+    )
+    groups = list(hash_groups.values())
+    rng = random.Random(config.seed)  # noqa: S311
+
+    groups_by_class = defaultdict(list)
+    for index, ids in enumerate(groups):
+        labels = [id_to_label[image_id] for image_id in ids]
+        groups_by_class[_representative_label(labels)].append(index)
+
+    train_indices, val_indices, test_indices = [], [], []
+
+    for indices in groups_by_class.values():
+        rng.shuffle(indices)
+        count = len(indices)
+
+        if count == 1:
+            train_indices.extend(indices)
+            continue
+
+        if count == 2:  # noqa: PLR2004
+            train_indices.append(indices[0])
+            test_indices.append(indices[1])
+            continue
+
+        n_val = max(1, round(count * val_size))
+        n_test = max(1, round(count * test_size))
+
+        while n_val + n_test >= count:
+            if n_val >= n_test and n_val > 1:
+                n_val -= 1
+            elif n_test > 1:
+                n_test -= 1
+            else:
+                break
+
+        val_indices.extend(indices[:n_val])
+        test_indices.extend(indices[n_val:n_val + n_test])
+        train_indices.extend(indices[n_val + n_test:])
+
+    def expand(indices):
+        return [
+            image_id
+            for index in indices
+            for image_id in groups[index]
+        ]
+
+    train_ids = expand(train_indices)
+    val_ids = expand(val_indices)
+    test_ids = expand(test_indices)
+
+    train_set, val_set, test_set = (
+        set(train_ids), set(val_ids), set(test_ids)
+    )
+
+    if train_set & val_set or train_set & test_set or val_set & test_set:
+        raise RuntimeError("Image IDs overlap between splits.")
+
+    split_by_id = {
+        **dict.fromkeys(train_ids, "train"),
+        **dict.fromkeys(val_ids, "val"),
+        **dict.fromkeys(test_ids, "test"),
+    }
+
+    cross_split_groups = [
+        (image_hash, ids)
+        for image_hash, ids in hash_groups.items()
+        if len({split_by_id.get(image_id) for image_id in ids}) > 1
+    ]
+    if cross_split_groups:
+        raise RuntimeError("Exact duplicate group crosses dataset splits.")
+
+    conflicting_groups = [
+        (image_hash, ids)
+        for image_hash, ids in hash_groups.items()
+        if len(ids) > 1
+        and len({id_to_label[image_id] for image_id in ids}) > 1
+    ]
+
+    dup_report = {
+        "n_dup_groups": sum(len(ids) > 1 for ids in hash_groups.values()),
+        "n_dup_images": sum(
+            len(ids) for ids in hash_groups.values() if len(ids) > 1
+        ),
+        "conflicting_groups": conflicting_groups,
+        "cross_split_groups": cross_split_groups,
+    }
+
+    train_df = df[df["id_code"].astype(str).isin(train_set)].copy()
+    val_df = df[df["id_code"].astype(str).isin(val_set)].copy()
+    test_df = df[df["id_code"].astype(str).isin(test_set)].copy()
+
+    train_ds = LumoculisDataset(
+        train_df, processed_dir, config.image_size,
+        transform=train_transforms(config.augment),
+    )
+    val_ds = LumoculisDataset(
+        val_df, processed_dir, config.image_size,
+        transform=val_transforms(),
+    )
+    test_ds = LumoculisDataset(
+        test_df, processed_dir, config.image_size,
+        transform=val_transforms(),
+    )
+
+    return train_ds, val_ds, test_ds, dup_report
 
 
 def class_counts_and_weights(
