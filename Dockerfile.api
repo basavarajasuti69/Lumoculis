@@ -34,6 +34,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONPATH="/app/src"
 
 COPY src/lumoculis ./src/lumoculis
+COPY scripts/start_api.sh /app/scripts/start_api.sh
+RUN chmod +x /app/scripts/start_api.sh
 
 RUN chown -R lumoculis:lumoculis /app
 
@@ -48,4 +50,4 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD python -c "import urllib.request, os; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '10000') + '/health', timeout=5)" || exit 1
 
-CMD ["sh", "-c", "uvicorn lumoculis.api.main:app --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["/app/scripts/start_api.sh"]
