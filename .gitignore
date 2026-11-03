@@ -18,3 +18,34 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.turbo/
+frontend/*.tsbuildinfo
+
+# Python caches
+.ruff_cache/
+.mypy_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+
+# Environment files
+.env.*
+
+# Root-level generated directories
+/node_modules/
+/.next/
+/.turbo/

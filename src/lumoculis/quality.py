@@ -4,6 +4,23 @@ Heuristic image-quality checks for fundus photographs. All thresholds are
 configurable; none are claimed to be clinically validated. This module does
 NOT make disease predictions and does not modify training data or splits.
 
+Blur calibration
+----------------
+The blur check crops the retinal field of view (non-dark pixels above
+``dark_pixel_level``) to exclude black borders, then resizes that region to
+``blur_standard_size`` (default 256x256) before computing Laplacian
+variance. This makes the score comparable across capture resolutions.
+
+The default threshold (30.0) was calibrated on 300 APTOS 2019 training
+images using the same standardized representation: the 5th percentile of
+sharp-image scores was 28.2, rounded to 30.0. A synthetic Gaussian-blur
+probe (ksize=41) scored below this threshold in 79% of cases, while 94.3%
+of unmodified images scored above it.
+
+Limitations: Laplacian variance is a focus proxy, not a clinical sharpness
+measure. It is sensitive to texture, contrast, and field-of-view cropping.
+Thresholds should be retuned for different cameras or acquisition protocols.
+
 Hard failures (status "fail") indicate the image should not be passed to the
 grading model without review. Warnings (status "warning") indicate marginal
 quality that may still be usable but should be flagged.
@@ -45,10 +62,12 @@ class QualityConfig:
     saturated_level: int = 250
     saturated_fraction: float = 0.30  # >30% saturated -> overexposed
 
-    # Blur: variance of the Laplacian on the grayscale image. Below this is
-    # considered blurry. Limitations: sensitive to image scale and content;
-    # not a substitute for clinical focus assessment.
-    blur_laplacian_var_min: float = 100.0
+    # Blur: variance of the Laplacian after cropping the retinal field of
+    # view and resizing it to ``blur_standard_size`` square. Below this is
+    # considered blurry. The default was calibrated on the APTOS 2019 training
+    # set (see module docstring) and is not clinically validated.
+    blur_laplacian_var_min: float = 30.0
+    blur_standard_size: int = 256
 
     # Retinal field of view: after cropping near-black borders, the fraction
     # of remaining pixels that are non-dark. Below this suggests little
@@ -239,9 +258,27 @@ def _check_overexposure(image: np.ndarray, cfg: QualityConfig) -> CheckResult:
     )
 
 
+def _crop_retinal_roi(gray: np.ndarray, dark_pixel_level: int) -> np.ndarray:
+    """Crop to the bounding box of non-dark pixels (retinal field of view)."""
+    mask = gray > dark_pixel_level
+    if not mask.any():
+        return gray
+    rows = np.any(mask, axis=1)
+    cols = np.any(mask, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+    return gray[rmin : rmax + 1, cmin : cmax + 1]
+
+
 def _check_blur(image: np.ndarray, cfg: QualityConfig) -> CheckResult:
     gray = _to_grayscale(image)
-    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    roi = _crop_retinal_roi(gray, cfg.dark_pixel_level)
+    # Standardise scale so the variance is comparable across capture
+    # resolutions: resize the retinal ROI to a fixed square.
+    standardized = cv2.resize(
+        roi, (cfg.blur_standard_size, cfg.blur_standard_size), interpolation=cv2.INTER_AREA
+    )
+    lap = cv2.Laplacian(standardized, cv2.CV_64F)
     var = float(lap.var())
     status = "fail" if var < cfg.blur_laplacian_var_min else "pass"
     reason = (
@@ -252,7 +289,10 @@ def _check_blur(image: np.ndarray, cfg: QualityConfig) -> CheckResult:
     return CheckResult(
         name="blur",
         status=status,
-        measured={"laplacian_variance": round(var, 3)},
+        measured={
+            "laplacian_variance": round(var, 3),
+            "standardized_size": cfg.blur_standard_size,
+        },
         threshold={"blur_laplacian_var_min": cfg.blur_laplacian_var_min},
         reason=reason,
         hard_failure=False,

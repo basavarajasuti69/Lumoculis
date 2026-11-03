@@ -19,10 +19,10 @@ from lumoculis.quality import (
 
 IMG_SIZE = 256
 LOW_RES_SIZE = 64
-BLUR_LAPLACIAN_MIN = 100.0
+BLUR_LAPLACIAN_MIN = 30.0
 CONFIG_MIN_WIDTH = 224
 CONFIG_MIN_HEIGHT = 224
-CONFIG_BLUR_MIN = 100.0
+CONFIG_BLUR_MIN = 30.0
 CONFIG_FOV_FRACTION = 0.10
 NUM_IMAGES = 3
 
@@ -117,12 +117,32 @@ def test_blurred_image_fails() -> None:
     assert blur_check.measured["laplacian_variance"] < BLUR_LAPLACIAN_MIN
 
 
+def test_sharp_vs_blurry_distinguished() -> None:
+    """Sharp images should score above threshold; blurred below."""
+    sharp = _synthetic_fundus()
+    blurred = _make_blurred(sharp, ksize=41)
+    sharp_result = assess_quality(sharp)
+    blurred_result = assess_quality(blurred)
+    sharp_blur = next(c for c in sharp_result.checks if c.name == "blur")
+    blurred_blur = next(c for c in blurred_result.checks if c.name == "blur")
+    assert sharp_blur.measured["laplacian_variance"] > BLUR_LAPLACIAN_MIN
+    assert blurred_blur.measured["laplacian_variance"] < BLUR_LAPLACIAN_MIN
+    assert sharp_blur.status == "pass"
+    assert blurred_blur.status == "fail"
+
+
 def test_dark_borders_around_visible_content_passes() -> None:
     """A visible retinal region with naturally dark borders should pass."""
     size = IMG_SIZE
     img = np.zeros((size, size, 3), dtype=np.uint8)
-    # Bright content only in the center, leaving dark borders.
-    img[64:192, 64:192] = [180, 140, 100]
+    # Textured retinal-like content in the center, leaving dark borders.
+    content = np.zeros((size, size), dtype=bool)
+    content[32:224, 32:224] = True
+    img[content] = [40, 40, 40]
+    cx, cy, r = size // 2, size // 2, size // 6
+    yy, xx = np.ogrid[:size, :size]
+    disk = (xx - cx) ** 2 + (yy - cy) ** 2 <= r**2
+    img[content & disk] = [180, 140, 100]
     result = assess_quality(img)
     assert result.status == "pass"
     fov_check = next(c for c in result.checks if c.name == "retinal_fov")
@@ -141,6 +161,48 @@ def test_configurable_thresholds() -> None:
     )
     result = assess_quality(img, config=cfg)
     assert result.status == "pass"
+
+
+
+def test_blur_standardized_across_resolutions() -> None:
+    """Blur assessment should be stable for the same content at different sizes."""
+    for size in (256, 384, 512):
+        img = _synthetic_fundus(size=size)
+        result = assess_quality(img)
+        blur_check = next(c for c in result.checks if c.name == "blur")
+        assert blur_check.measured["standardized_size"] == 256  # noqa: PLR2004
+        assert blur_check.status == "pass"
+
+
+def test_blur_with_black_borders_uses_retinal_roi() -> None:
+    """Black borders must not dominate the blur measurement."""
+    size = IMG_SIZE
+    img = np.zeros((size, size, 3), dtype=np.uint8)
+    content = np.zeros((size, size), dtype=bool)
+    content[32:224, 32:224] = True
+    img[content] = [40, 40, 40]
+    cx, cy, r = size // 2, size // 2, size // 6
+    yy, xx = np.ogrid[:size, :size]
+    disk = (xx - cx) ** 2 + (yy - cy) ** 2 <= r**2
+    img[content & disk] = [180, 140, 100]
+    result = assess_quality(img)
+    blur_check = next(c for c in result.checks if c.name == "blur")
+    assert blur_check.status == "pass"
+
+
+def test_blur_empty_image_does_not_crash() -> None:
+    img = np.zeros((0, 0, 3), dtype=np.uint8)
+    result = assess_quality(img)
+    assert result.decoded is False
+    assert result.status == "fail"
+
+
+def test_blur_grayscale_input() -> None:
+    gray = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)
+    gray[:] = 100
+    result = assess_quality(gray)
+    blur_check = next(c for c in result.checks if c.name == "blur")
+    assert "laplacian_variance" in blur_check.measured
 
 
 def test_json_serialization() -> None:

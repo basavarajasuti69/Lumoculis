@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  /* Typography */
+  --font-sans: var(--font-inter);
+
+  /* Dark editorial design system — automotive inspired */
+  --color-background: #111111;
+  --color-foreground: #F5F5F5;
+
+  --color-card: #222222;
+  --color-card-foreground: #F5F5F5;
+
+  --color-surface-secondary: #181818;
+  --color-surface-elevated: #292929;
+
+  /* Primary accent (red) */
+  --color-primary: #DA291C;
+  --color-primary-hover: #B01E0A;
+  --color-primary-foreground: #FFFFFF;
+
+  /* Secondary / muted */
+  --color-secondary: #B3B3B3;
+  --color-secondary-foreground: #F5F5F5;
+  --color-muted: #858585;
+  --color-muted-foreground: #B3B3B3;
+
+  /* Accent */
+  --color-accent: #DA291C;
+  --color-accent-hover: #B01E0A;
+  --color-accent-foreground: #FFFFFF;
+
+  /* Destructive */
+  --color-destructive: #DA291C;
+  --color-destructive-foreground: #FFFFFF;
+
+  /* Success - restrained, accessible green */
+  --color-success: #10B981;
+  --color-success-hover: #059669;
+  --color-success-foreground: #FFFFFF;
+
+  /* Warning */
+  --color-warning: #F59E0B;
+  --color-warning-foreground: #FFFFFF;
+
+  /* Borders and inputs */
+  --color-border: #353535;
+  --color-input: #353535;
+  --color-ring: #DA291C;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  /* Spacing scale */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+  --spacing-3xl: 64px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+html {
+  overflow-x: hidden;
+}
+
+/* Focus ring utility for accessibility */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
