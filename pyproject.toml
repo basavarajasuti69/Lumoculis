@@ -60,3 +60,6 @@ pythonpath = ["src"]
 lumoculis-calibrate = "lumoculis.calibrate_cli:main"
 lumoculis-quality = "lumoculis.quality_cli:main"
 lumoculis-infer = "lumoculis.infer_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lumoculis"]

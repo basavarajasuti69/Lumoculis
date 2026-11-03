@@ -49,8 +49,9 @@ Thumbs.db
 # Notebooks (not needed at runtime)
 notebooks/
 
-# Scripts (not needed at runtime)
-scripts/
+# Scripts (not needed at runtime), except the API startup script
+scripts/*
+!scripts/start_api.sh
 
 # Docker metadata
 .dockerignore
