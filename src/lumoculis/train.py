@@ -79,7 +79,7 @@ def _class_weight_tensor(
     return torch.tensor(weight_list, dtype=torch.float32, device=device)
 
 
-def train_epoch(  # noqa: PLR0913
+def train_epoch(  # noqa: PLR0913, PLR0917
     model: nn.Module,
     loader: DataLoader,
     criterion: nn.Module,
@@ -175,7 +175,7 @@ def train_epoch(  # noqa: PLR0913
     }
 
 
-def validate(  # noqa: PLR0913, PLR0915
+def validate(  # noqa: PLR0913, PLR0915, PLR0917
     model: nn.Module,
     loader: DataLoader,
     criterion: nn.Module,
@@ -356,7 +356,7 @@ def _log_mlflow_params(config: Config, device: torch.device) -> None:
     mlflow.log_params(params)
 
 
-def _save_best_epoch(  # noqa: PLR0913
+def _save_best_epoch(  # noqa: PLR0913, PLR0917
     no_save: bool,
     run_dir: Path,
     model: nn.Module,
@@ -407,7 +407,7 @@ def _log_mlflow_artifacts(
         print(f"  mlflow artifact upload: {elapsed:.2f}s")
 
 
-def run_training(  # noqa: PLR0913, PLR0915
+def run_training(  # noqa: PLR0913, PLR0915, PLR0917
     config: Config,
     run_name: str | None = None,
     max_batches: int | None = None,
@@ -432,7 +432,7 @@ def run_training(  # noqa: PLR0913, PLR0915
     # --- Dataset and DataLoader initialization ---
     t0 = time.perf_counter()
     csv_path = Path(config.data_dir) / "train.csv"
-    train_ds, val_ds, dup_report = train_val_split(csv_path, config.processed_dir, config)
+    train_ds, val_ds, _dup_report = train_val_split(csv_path, config.processed_dir, config)
     train_loader, val_loader = _build_dataloaders(train_ds, val_ds, config)
     t_dataset_init = time.perf_counter() - t0
     print(f"Dataset + DataLoader init: {t_dataset_init:.2f}s")

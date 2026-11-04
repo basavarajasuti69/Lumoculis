@@ -25,6 +25,7 @@ from typing import Any
 
 import cv2
 import numpy as np
+import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -232,12 +233,20 @@ async def lifespan(app: FastAPI):
         return
 
     try:
+        torch.set_num_threads(1)
+        try:
+            torch.set_num_interop_threads(1)
+        except RuntimeError:
+            pass
         device = _pick_device(DEVICE)
         loaded_model, metadata = _load_checkpoint(CHECKPOINT_PATH, device)
         model = loaded_model
         model_metadata = metadata
         num_classes = int(metadata.get("config", {}).get("num_classes", 5))
         temperature_scaling = _load_temperature(CALIBRATION_PATH, num_classes)
+        import gc  # noqa: PLC0415
+
+        gc.collect()
         LOGGER.info("Lumoculis model loaded from %s", CHECKPOINT_PATH)
     except Exception as exc:  # keep startup resilient; /health reports degraded status
         model_error = "model_initialization_failed"
@@ -374,6 +383,7 @@ def _run_prediction(params: _PredictionParams) -> PredictionResponse:
     device = _pick_device(device_name)
 
     input_tensor, rgb_image, width, height = _preprocess_image(img, 384, device)
+    img = None  # release the original decoded image
 
     quality_result = None
     quality_blocked = False

@@ -66,7 +66,7 @@ def _collect_predictions(model, dataset, device, batch_size=8):
     return y_true, y_prob
 
 
-def run_test_evaluation(  # noqa: PLR0913
+def run_test_evaluation(  # noqa: PLR0913, PLR0917
     csv_path: str | Path,
     processed_dir: str | Path,
     config: Config,
@@ -82,7 +82,7 @@ def run_test_evaluation(  # noqa: PLR0913
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
     # Historical split for exact validation-ID preservation.
-    hist_train_ds, hist_val_ds, _ = train_val_split(
+    _hist_train_ds, hist_val_ds, _ = train_val_split(
         csv_path, processed_dir, config, val_size=val_size
     )
     hist_val_ids = set(hist_val_ds.df["id_code"].astype(str))
@@ -181,7 +181,7 @@ def run_test_evaluation(  # noqa: PLR0913
     return {"run_dir": str(run_dir), "metrics": metrics}
 
 
-def create_holdout_split(  # noqa: PLR0912, PLR0913, PLR0915
+def create_holdout_split(  # noqa: PLR0912, PLR0913, PLR0915, PLR0917
     csv_path: str | Path,
     processed_dir: str | Path,
     config: Config,
@@ -303,7 +303,7 @@ def create_holdout_split(  # noqa: PLR0912, PLR0913, PLR0915
     return train_ds, val_ds, test_ds, report, train_ids, val_ids, test_ids, excluded_ids
 
 
-def run_holdout_evaluation(  # noqa: PLR0913
+def run_holdout_evaluation(  # noqa: PLR0913, PLR0917
     csv_path,
     processed_dir,
     config,
@@ -322,7 +322,7 @@ def run_holdout_evaluation(  # noqa: PLR0913
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-    train_ds, val_ds, test_ds, report, train_ids, val_ids, test_ids, excluded_ids = create_holdout_split(
+    _train_ds, _val_ds, test_ds, report, train_ids, val_ids, test_ids, excluded_ids = create_holdout_split(
         csv_path, processed_dir, config, set(historical_ids), val_size=val_size, test_size=test_size, seed=seed
     )
 

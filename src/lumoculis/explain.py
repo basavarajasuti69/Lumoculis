@@ -13,11 +13,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch import nn
@@ -154,6 +149,8 @@ class GradCAM:
         # overlay aligns with the original image.
         input_h, input_w = input_tensor.shape[2], input_tensor.shape[3]
         if heatmap_np.shape != (input_h, input_w):
+            import cv2  # noqa: PLC0415
+
             heatmap_np = cv2.resize(heatmap_np, (input_w, input_h), interpolation=cv2.INTER_LINEAR)
             # Re-normalize after resize to keep values in [0, 1].
             max_val = heatmap_np.max()
@@ -167,7 +164,7 @@ def overlay_heatmap(
     image: np.ndarray,
     heatmap: np.ndarray,
     alpha: float = 0.6,
-    colormap: int = cv2.COLORMAP_JET,
+    colormap: int | None = None,
 ) -> np.ndarray:
     """Overlay *heatmap* on *image*.
 
@@ -188,6 +185,12 @@ def overlay_heatmap(
     overlay : np.ndarray
         uint8 HWC RGB image with heatmap overlaid.
     """
+    if colormap is None:
+        import cv2  # noqa: PLC0415
+
+        colormap = cv2.COLORMAP_JET
+    import cv2  # noqa: PLC0415
+
     heatmap_resized = cv2.resize(
         heatmap, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR
     )
@@ -201,7 +204,7 @@ def overlay_heatmap(
     return overlay
 
 
-def save_gradcam_visualization(  # noqa: PLR0913
+def save_gradcam_visualization(  # noqa: PLR0913, PLR0917
     original_image: np.ndarray,
     heatmap: np.ndarray,
     output_path: str | Path,
@@ -229,6 +232,10 @@ def save_gradcam_visualization(  # noqa: PLR0913
         class_names[predicted_class] if predicted_class < len(class_names) else str(predicted_class)
     )
 
+    import matplotlib  # noqa: PLC0415
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: PLC0415
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
     axes[0].imshow(original_image)
     axes[0].set_title("Original")

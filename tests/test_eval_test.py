@@ -54,7 +54,7 @@ def test_holdout_excludes_historical_and_duplicates(tmp_path):
     processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of={"img1": "img0"})
     config = _config(seed=42, image_size=64)
     hist = {"img0", "img2"}
-    train_ds, val_ds, test_ds, report, train_ids, val_ids, test_ids, excluded = create_holdout_split(
+    _train_ds, _val_ds, _test_ds, report, train_ids, val_ids, test_ids, _excluded = create_holdout_split(
         csv_path, processed_dir, config, hist, val_size=0.2, test_size=0.2, seed=42
     )
     assert "img0" not in train_ids and "img0" not in val_ids and "img0" not in test_ids
@@ -140,7 +140,7 @@ def test_holdout_duplicate_group_excluded_when_member_historical(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
     config = _config(seed=42, image_size=64)
-    _, _, _, report, train_ids, val_ids, test_ids, excluded = create_holdout_split(
+    _, _, _, _report, train_ids, val_ids, test_ids, excluded = create_holdout_split(
         csv_path, processed_dir, config, {"img0"}, val_size=0.2, test_size=0.2, seed=42
     )
     assert "img0" in excluded and "img1" in excluded

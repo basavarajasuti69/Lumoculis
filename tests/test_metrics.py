@@ -115,7 +115,7 @@ def test_bootstrap_referable_auroc_ci_perfect() -> None:
     probs = np.zeros((50, 5))
     probs[0:20, 0] = 1.0  # grades 0-1 -> all mass on class 0
     probs[20:50, 2] = 1.0  # grades 2-4 -> all mass on class 2
-    point, lo, hi = metrics.bootstrap_referable_auroc_ci(y_true, probs, n_bootstrap=50, seed=42)
+    point, _lo, _hi = metrics.bootstrap_referable_auroc_ci(y_true, probs, n_bootstrap=50, seed=42)
     assert point == 1.0
 
 

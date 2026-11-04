@@ -11,6 +11,11 @@ disease, and image-quality thresholds are heuristic, not clinically validated.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lumoculis.calibration import TemperatureScaling
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,12 +27,9 @@ import torch
 from torch import nn
 from torchvision import transforms
 
-from lumoculis.calibration import TemperatureScaling
 from lumoculis.config import Config
-from lumoculis.data import IMAGENET_MEAN, IMAGENET_STD
-from lumoculis.explain import GradCAM, save_gradcam_visualization
 from lumoculis.model import build_model
-from lumoculis.preprocess import load_image, preprocess
+from lumoculis.preprocess import IMAGENET_MEAN, IMAGENET_STD, load_image, preprocess
 from lumoculis.quality import QualityConfig, QualityResult, assess_quality
 
 NUM_CLASSES = 5
@@ -152,7 +154,7 @@ def _load_checkpoint(
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
     try:
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
     except Exception as exc:  # surface a clear error
         raise ValueError(f"Could not load checkpoint {checkpoint_path}: {exc}") from exc
 
@@ -200,6 +202,7 @@ def _load_checkpoint(
             "num_classes": config.num_classes,
         },
     }
+    del checkpoint
     return model, metadata
 
 
@@ -218,6 +221,8 @@ def _load_temperature(
     if not path.exists():
         return None
     try:
+        from lumoculis.calibration import TemperatureScaling  # noqa: PLC0415
+
         return TemperatureScaling.load(path)
     except Exception:  # do not fabricate calibration metadata
         return None
@@ -278,7 +283,7 @@ def _predict_probs(
 ) -> np.ndarray:
     """Run the model and return raw class probabilities (shape (1, num_classes))."""
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         logits = model(input_tensor)
         probs = torch.softmax(logits, dim=1)
     return probs.cpu().numpy()
@@ -337,7 +342,7 @@ def _compute_predictions(
     temperature_applied = temperature_scaling is not None and temperature_scaling.fitted
     if temperature_applied:
         model.eval()
-        with torch.no_grad():
+        with torch.inference_mode():
             logits = model(input_tensor)
         logits_np = logits.cpu().numpy()
         calibrated_probs = temperature_scaling.apply(logits_np)
@@ -371,6 +376,8 @@ def _run_gradcam_visualization(
     gradcam_output_path: str | Path | None = None
     if config.gradcam:
         try:
+            from lumoculis.explain import GradCAM, save_gradcam_visualization  # noqa: PLC0415
+
             with GradCAM(model, target_layer=None) as gradcam:
                 heatmap, target_class = gradcam.compute_heatmap(
                     input_tensor,
@@ -416,7 +423,7 @@ def run_inference(
     """
     device = _pick_device(config.device)
 
-    model, model_name, num_classes, temperature_scaling = _resolve_model_and_temperature(
+    model, model_name, _num_classes, temperature_scaling = _resolve_model_and_temperature(
         config, device
     )
 

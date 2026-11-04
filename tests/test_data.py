@@ -194,7 +194,7 @@ def test_conflicting_labels_detected(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
 
-    train_ds, val_ds, dup_report = train_val_split(
+    _train_ds, _val_ds, dup_report = train_val_split(
         csv_path, processed_dir, _config(seed=42), val_size=0.25
     )
 
@@ -376,7 +376,7 @@ def test_preserving_validation_keeps_historical_val(tmp_path):
     hist_train_ds, hist_val_ds, _ = train_val_split(
         csv_path, processed_dir, _config(seed=42), val_size=0.2
     )
-    new_train_ds, new_val_ds, new_test_ds, report = (
+    new_train_ds, new_val_ds, new_test_ds, _report = (
         train_val_test_split_preserving_validation(
             csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.15
         )
@@ -440,7 +440,7 @@ def test_three_way_rare_class_allocation(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
 
-    train_ds, val_ds, test_ds, report = train_val_test_split(
+    train_ds, val_ds, test_ds, _report = train_val_test_split(
         csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.2
     )
     train_ids = set(train_ds.df["id_code"].astype(str))
@@ -459,7 +459,7 @@ def test_three_way_conflicting_labels_reported(tmp_path):
     csv_path = _make_csv(tmp_path, id_codes, labels)
     processed_dir = _make_synthetic_images(tmp_path, id_codes, duplicate_of=duplicate_of)
 
-    train_ds, val_ds, test_ds, report = train_val_test_split(
+    _train_ds, _val_ds, _test_ds, report = train_val_test_split(
         csv_path, processed_dir, _config(seed=42), val_size=0.2, test_size=0.2
     )
     assert any(set(ids) == {"img0", "img1"} for _, ids in report["conflicting_groups"])

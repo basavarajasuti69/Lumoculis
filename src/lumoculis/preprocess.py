@@ -13,6 +13,9 @@ import numpy as np
 
 GRAYSCALE_NDIM = 2
 
+IMAGENET_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_STD = (0.229, 0.224, 0.225)
+
 
 def crop_black_borders(image: np.ndarray, tol: int = 10) -> np.ndarray:
     """Crop near-black borders from *image*.

@@ -17,10 +17,6 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -454,6 +450,10 @@ def plot_reliability_diagram(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    import matplotlib  # noqa: PLC0415
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt  # noqa: PLC0415
     bins = [b for b in calibration_result["per_bin"] if b["count"] > 0]
     if not bins:
         # Still save an empty diagram with a note.

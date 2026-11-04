@@ -116,7 +116,7 @@ def render_confusion_matrix(cm: np.ndarray, class_names: Sequence[str] | None = 
     return fig
 
 
-def bootstrap_ci(  # noqa: PLR0913
+def bootstrap_ci(  # noqa: PLR0913, PLR0917
     metric_fn,
     y_true: np.ndarray,
     y_pred_or_probs: np.ndarray,
@@ -223,7 +223,7 @@ def bootstrap_referable_auroc_ci(
     )
 
 
-def bootstrap_referable_sens_spec_ci(  # noqa: PLR0913
+def bootstrap_referable_sens_spec_ci(  # noqa: PLR0913, PLR0917
     y_true: np.ndarray,
     probs: np.ndarray,
     threshold: float = 0.5,
@@ -249,7 +249,7 @@ def bootstrap_referable_sens_spec_ci(  # noqa: PLR0913
     return sens_ci, spec_ci
 
 
-def bootstrap_per_class_sensitivity_ci(  # noqa: PLR0913
+def bootstrap_per_class_sensitivity_ci(  # noqa: PLR0913, PLR0917
     y_true: np.ndarray,
     y_pred: np.ndarray,
     num_classes: int = NUM_CLASSES,
