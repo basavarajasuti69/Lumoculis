@@ -16,6 +16,12 @@ from __future__ import annotations
 
 import logging
 import os
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -24,15 +30,17 @@ from pathlib import Path
 from typing import Any
 
 import cv2
-import numpy as np
-import torch
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict
 
-from lumoculis.inference import (
+cv2.setNumThreads(1)
+import numpy as np  # noqa: E402
+import torch  # noqa: E402
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pydantic import BaseModel, ConfigDict  # noqa: E402
+
+from lumoculis.inference import (  # noqa: E402
     RESEARCH_DISCLAIMER,
     InferenceConfig,
     _compute_predictions,
@@ -43,7 +51,7 @@ from lumoculis.inference import (
     _run_gradcam_visualization,
     _run_quality_assessment,
 )
-from lumoculis.quality import QualityConfig
+from lumoculis.quality import QualityConfig  # noqa: E402
 
 LOGGER = logging.getLogger("lumoculis.api")
 
@@ -247,6 +255,12 @@ async def lifespan(app: FastAPI):
         import gc  # noqa: PLC0415
 
         gc.collect()
+        try:
+            import ctypes  # noqa: PLC0415
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
         LOGGER.info("Lumoculis model loaded from %s", CHECKPOINT_PATH)
     except Exception as exc:  # keep startup resilient; /health reports degraded status
         model_error = "model_initialization_failed"
