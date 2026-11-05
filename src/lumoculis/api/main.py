@@ -420,6 +420,13 @@ def _run_prediction(params: _PredictionParams) -> PredictionResponse:
         LOGGER.exception("Inference failed")
         raise HTTPException(status_code=500, detail="inference_failed") from exc
 
+    if not gradcam:
+        input_tensor = None
+
+    if not gradcam:
+        img = None
+        rgb_image = None
+
     gradcam_saved = None
     gradcam_url = None
     if gradcam and gradcam_path:

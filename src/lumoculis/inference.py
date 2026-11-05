@@ -25,7 +25,6 @@ import cv2
 import numpy as np
 import torch
 from torch import nn
-from torchvision import transforms
 
 from lumoculis.config import Config
 from lumoculis.model import build_model
@@ -259,8 +258,9 @@ def _preprocess_image(
     processed_rgb = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
 
     # ToTensor + ImageNet normalization, same as data.py __getitem__.
-    # ToTensor accepts a uint8 HWC numpy array directly.
-    tensor = transforms.ToTensor()(processed_rgb)
+    # Avoid importing torchvision here to keep the API process smaller.
+    tensor = torch.from_numpy(processed_rgb).permute(2, 0, 1).contiguous()
+    tensor = tensor.float().div(255.0)
     mean_t = torch.tensor(IMAGENET_MEAN).view(3, 1, 1)
     std_t = torch.tensor(IMAGENET_STD).view(3, 1, 1)
     tensor = (tensor - mean_t) / std_t
