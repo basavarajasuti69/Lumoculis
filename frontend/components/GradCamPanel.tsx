@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { downloadGradCam, resolveGradCamUrl } from "@/lib/api";
+import { resolveGradCamUrl } from "@/lib/api";
 
 export function GradCamPanel({
   originalImageUrl,
@@ -13,19 +13,14 @@ export function GradCamPanel({
   originalImageUrl: string;
   gradcamUrl: string;
 }) {
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const handleDownload = async () => {
-    setDownloading(true);
-    setDownloadError(null);
-    try {
-      await downloadGradCam(gradcamUrl);
-    } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : "Failed to download Grad-CAM.");
-    } finally {
-      setDownloading(false);
-    }
+  const handleDownload = () => {
+    const anchor = document.createElement("a");
+    anchor.href = gradcamUrl;
+    anchor.download = "lumoculis-gradcam.png";
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
   };
 
   return (
@@ -37,13 +32,10 @@ export function GradCamPanel({
             variant="outline"
             size="sm"
             onClick={handleDownload}
-            disabled={downloading}
           >
-            {downloading ? "Downloading…" : (
-              <>
+            <>
                 <Download className="mr-1 h-4 w-4" /> Download
               </>
-            )}
           </Button>
         )}
       </CardHeader>
@@ -70,9 +62,6 @@ export function GradCamPanel({
             <p className="text-xs text-center text-secondary">Grad-CAM sensitivity</p>
           </div>
         </div>
-        {downloadError && (
-          <p className="mt-3 text-xs text-destructive">{downloadError}</p>
-        )}
         <p className="mt-4 text-xs text-secondary leading-relaxed">
           Grad-CAM highlights image regions that influenced the model&apos;s prediction. It does not
           establish disease location or causality.

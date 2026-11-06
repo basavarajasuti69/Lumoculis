@@ -157,6 +157,37 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return (await res.json()) as HealthResponse;
 }
 
+export async function generateGradCam(file: File, targetClass: number): Promise<string> {
+  const formData = new FormData();
+  formData.append("file", file, file.name);
+  formData.append("target_class", String(targetClass));
+
+  const res = await fetch("/api/gradcam", {
+    method: "POST",
+    body: formData,
+    cache: "no-store",
+  });
+
+  if (!res.ok) {
+    let detail: unknown;
+    try {
+      detail = await res.json();
+    } catch {
+      detail = res.statusText;
+    }
+    throw new ApiError(
+      res.status,
+      (detail && typeof detail === "object" && "error" in detail
+        ? String((detail as { error: unknown }).error)
+        : `Grad-CAM request failed with status ${res.status}`),
+      detail
+    );
+  }
+
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export function resolveGradCamUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   try {

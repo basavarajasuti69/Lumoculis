@@ -11,7 +11,7 @@ import { ProbabilityBar } from "@/components/ProbabilityBar";
 import { QualityPanel } from "@/components/QualityPanel";
 import { GradCamPanel } from "@/components/GradCamPanel";
 import { ResearchDisclaimer } from "@/components/ResearchDisclaimer";
-import { predictImage, resolveGradCamUrl, downloadGradCam, type PredictionResponse } from "@/lib/api";
+import { predictImage, resolveGradCamUrl, downloadGradCam, generateGradCam, type PredictionResponse } from "@/lib/api";
 
 const ACCEPTED_EXTENSIONS = ["image/png", "image/jpeg", "image/jpg"];
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -25,12 +25,15 @@ export default function Analyze() {
   const [runQualityGate, setRunQualityGate] = useState(false);
   const [qualityRequired, setQualityRequired] = useState(false);
   const [gradcam, setGradcam] = useState(false);
+  const [gradcamUrl, setGradcamUrl] = useState<string | null>(null);
+  const [gradcamError, setGradcamError] = useState<string | null>(null);
   const [device, setDevice] = useState<"cpu" | "mps" | "auto">("auto");
 
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = useCallback(() => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    if (gradcamUrl) URL.revokeObjectURL(gradcamUrl);
     setFile(null);
     setPreviewUrl(null);
     setResult(null);
@@ -77,10 +80,20 @@ export default function Analyze() {
       const response = await predictImage(file, {
         runQualityGate,
         qualityRequired,
-        gradcam,
+        gradcam: false,
         device,
       });
       setResult(response);
+
+      if (gradcam) {
+        setGradcamError(null);
+        try {
+          const url = await generateGradCam(file, response.predicted_class);
+          setGradcamUrl(url);
+        } catch (gErr) {
+          setGradcamError(gErr instanceof Error ? gErr.message : "Grad-CAM generation failed.");
+        }
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") return;
       if (err instanceof Error && (err as { errorCode?: string | null }).errorCode === "quality_gate_failed") {
@@ -172,7 +185,7 @@ export default function Analyze() {
 
           <div className="flex-1 lg:w-1/2">
             {result ? (
-              <Results result={result} onDownloadJson={downloadJson} previewUrl={previewUrl} />
+              <Results result={result} onDownloadJson={downloadJson} previewUrl={previewUrl} gradcamUrl={gradcamUrl} gradcamError={gradcamError} />
             ) : (
               <Card className="h-full border-border bg-card">
                 <CardContent className="p-8 text-center">
@@ -389,10 +402,14 @@ function Results({
   result,
   onDownloadJson,
   previewUrl,
+  gradcamUrl,
+  gradcamError,
 }: {
   result: PredictionResponse;
   onDownloadJson: () => void;
   previewUrl: string | null;
+  gradcamUrl: string | null;
+  gradcamError: string | null;
 }) {
   const rawBars = result.raw_probabilities.map((p, i) => ({ grade: i, probability: p, isPredicted: i === result.predicted_class }));
   const calibratedBars = result.calibrated_probabilities
@@ -466,10 +483,13 @@ function Results({
           </div>
         )}
 
-        {result.gradcam_saved && result.gradcam_url && previewUrl && (
+        {gradcamUrl && previewUrl && (
           <div className="mt-8">
-            <GradCamPanel originalImageUrl={previewUrl ?? ""} gradcamUrl={resolveGradCamUrl(result.gradcam_url) ?? ""} />
+            <GradCamPanel originalImageUrl={previewUrl} gradcamUrl={gradcamUrl} />
           </div>
+        )}
+        {gradcamError && (
+          <p className="mt-4 text-sm text-destructive">{gradcamError}</p>
         )}
 
         <div className="mt-8 flex items-center gap-3">
