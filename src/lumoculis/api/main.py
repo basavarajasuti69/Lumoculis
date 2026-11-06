@@ -391,6 +391,15 @@ app.add_middleware(
 app.mount("/gradcam", StaticFiles(directory=GRADCAM_DIR.name), name="gradcam")
 
 
+
+def _model_configured() -> bool:
+    """Whether the configured model artifact path is set for the active backend."""
+    if BACKEND == "onnx":
+        return bool(ONNX_MODEL_PATH)
+    return bool(CHECKPOINT_PATH)
+
+
+
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     if model_error in {"no_checkpoint_configured", "no_onnx_model_configured"}:
@@ -405,14 +414,14 @@ def health() -> HealthResponse:
         return HealthResponse(
             status="degraded",
             model_loaded=False,
-            checkpoint_configured=bool(CHECKPOINT_PATH),
+            checkpoint_configured=_model_configured(),
             device=DEVICE,
             error="model_initialization_failed",
         )
     return HealthResponse(
         status="ok" if model is not None else "degraded",
         model_loaded=model is not None,
-        checkpoint_configured=bool(CHECKPOINT_PATH),
+        checkpoint_configured=_model_configured() and model is not None,
         device=DEVICE,
     )
 
@@ -429,14 +438,14 @@ def model_info() -> ModelInfo:
     if model_error:
         return ModelInfo(
             model_loaded=False,
-            checkpoint_configured=bool(CHECKPOINT_PATH),
+            checkpoint_configured=_model_configured(),
             device=DEVICE,
             error="model_initialization_failed",
         )
     if model is None or model_metadata is None:
         return ModelInfo(
             model_loaded=False,
-            checkpoint_configured=bool(CHECKPOINT_PATH),
+            checkpoint_configured=_model_configured(),
             device=DEVICE,
             error="model_not_loaded",
         )

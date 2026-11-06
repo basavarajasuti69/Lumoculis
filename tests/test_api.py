@@ -461,6 +461,36 @@ def test_onnx_backend_missing_model(monkeypatch: pytest.MonkeyPatch) -> None:
         assert response.json()["model_loaded"] is False
         assert response.json()["error"] == "no_onnx_model_configured"
 
+def test_health_onnx_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    monkeypatch.setattr(api_main, "BACKEND", "onnx")
+    monkeypatch.setattr(api_main, "ONNX_MODEL_PATH", __file__)
+    monkeypatch.setattr(api_main, "model", MagicMock())
+    monkeypatch.setattr(api_main, "model_metadata", _dummy_metadata())
+    monkeypatch.setattr(api_main, "temperature_scaling", None)
+    monkeypatch.setattr(api_main, "model_error", None)
+    monkeypatch.setattr("lumoculis.onnx_inference.load_onnx_model", lambda path: MagicMock())
+    monkeypatch.setattr("lumoculis.onnx_inference.load_temperature", lambda path, num_classes=5: None)
+    with TestClient(api_main.app) as client:
+        response = client.get("/health")
+        assert response.status_code == OK
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["model_loaded"] is True
+        assert data["checkpoint_configured"] is True
+
+
+def test_health_pytorch_loaded(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    monkeypatch.setattr(api_main, "BACKEND", "pytorch")
+    with TestClient(api_main.app) as client:
+        response = client.get("/health")
+        assert response.status_code == OK
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["model_loaded"] is True
+        assert data["checkpoint_configured"] is True
+
 def test_model_info_no_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(api_main, "CHECKPOINT_PATH", "")
     monkeypatch.setattr(api_main, "model", None)
