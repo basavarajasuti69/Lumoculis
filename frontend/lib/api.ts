@@ -115,11 +115,11 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
         ? (detail as { detail: unknown }).detail
         : detail;
     const message =
-      (unwrapped && typeof unwrapped === "object" && "error" in unwrapped
-        ? String((unwrapped as { error: unknown }).error)
-        : null) ||
       (unwrapped && typeof unwrapped === "object" && "message" in unwrapped
         ? String((unwrapped as { message: unknown }).message)
+        : null) ||
+      (unwrapped && typeof unwrapped === "object" && "error" in unwrapped
+        ? String((unwrapped as { error: unknown }).error)
         : null) ||
       `Request failed with status ${res.status}`;
     throw new ApiError(res.status, message, detail);

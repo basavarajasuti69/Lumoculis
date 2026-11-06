@@ -17,6 +17,8 @@ from typing import Any
 import boto3
 
 DEFAULT_CHECKPOINT_PATH = Path("/tmp/lumoculis/best.pt")  # noqa: S108
+DEFAULT_ONNX_PATH = Path("/tmp/lumoculis/best.onnx")  # noqa: S108
+DEFAULT_ONNX_KEY = "models/best.onnx"
 DEFAULT_BUCKET = "lumoculis-project-basavaraj-2026"
 DEFAULT_KEY = "models/best.pt"
 DEFAULT_REGION = "ap-southeast-2"
@@ -47,11 +49,19 @@ def download_checkpoint() -> Path:
     if not access_key or not secret_key:
         raise RuntimeError("AWS credentials are not configured")
 
+    backend = os.environ.get("LUMOCULIS_BACKEND", "pytorch").strip().lower()
+    if backend == "onnx":
+        key = os.environ.get("LUMOCULIS_S3_ONNX_KEY", "").strip() or DEFAULT_ONNX_KEY
+        destination = Path(
+            os.environ.get("LUMOCULIS_ONNX_MODEL", "").strip() or str(DEFAULT_ONNX_PATH)
+        )
+    else:
+        key = os.environ.get("LUMOCULIS_S3_KEY", "").strip() or DEFAULT_KEY
+        destination = Path(
+            os.environ.get("LUMOCULIS_CHECKPOINT", "").strip() or str(DEFAULT_CHECKPOINT_PATH)
+        )
+
     bucket = os.environ.get("LUMOCULIS_S3_BUCKET", "").strip() or DEFAULT_BUCKET
-    key = os.environ.get("LUMOCULIS_S3_KEY", "").strip() or DEFAULT_KEY
-    destination = Path(
-        os.environ.get("LUMOCULIS_CHECKPOINT", "").strip() or str(DEFAULT_CHECKPOINT_PATH)
-    )
 
     if destination.exists() and destination.is_file() and destination.stat().st_size > 0:
         return destination
@@ -80,7 +90,10 @@ def download_checkpoint() -> Path:
             pass
         raise RuntimeError("Downloaded checkpoint is missing or empty")
 
-    os.environ["LUMOCULIS_CHECKPOINT"] = str(destination)
+    if backend == "onnx":
+        os.environ["LUMOCULIS_ONNX_MODEL"] = str(destination)
+    else:
+        os.environ["LUMOCULIS_CHECKPOINT"] = str(destination)
     return destination
 
 

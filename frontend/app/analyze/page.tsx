@@ -83,7 +83,7 @@ export default function Analyze() {
       setResult(response);
     } catch (err: unknown) {
       if (err instanceof Error && err.name === "AbortError") return;
-      if (err instanceof Error && err.message === "quality_gate_failed") {
+      if (err instanceof Error && (err as { errorCode?: string | null }).errorCode === "quality_gate_failed") {
         const apiErr = err as Error & { quality?: unknown; detail?: unknown };
         const unwrapped =
           apiErr.detail && typeof apiErr.detail === "object" && "detail" in apiErr.detail

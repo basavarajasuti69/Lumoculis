@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from lumoculis.calibration import TemperatureScaling
+    from lumoculis.quality import QualityConfig, QualityResult
 
 import json
 from dataclasses import dataclass
@@ -29,7 +30,6 @@ from torch import nn
 from lumoculis.config import Config
 from lumoculis.model import build_model
 from lumoculis.preprocess import IMAGENET_MEAN, IMAGENET_STD, load_image, preprocess
-from lumoculis.quality import QualityConfig, QualityResult, assess_quality
 
 NUM_CLASSES = 5
 IMAGE_SIZE = 384
@@ -316,6 +316,8 @@ def _run_quality_assessment(
     quality_result: QualityResult | None = None
     quality_blocked = False
     if config.run_quality_gate:
+        from lumoculis.quality import QualityConfig, assess_quality  # noqa: PLC0415
+
         q_config = config.quality_config or QualityConfig()
         quality_result = assess_quality(image, config=q_config)
         if config.quality_required and quality_result.status != "pass":

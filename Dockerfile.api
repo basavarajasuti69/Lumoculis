@@ -11,7 +11,6 @@ COPY pyproject.toml uv.lock ./
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
-ENV UV_TORCH_BACKEND=cpu
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-cache
 
@@ -44,10 +43,12 @@ RUN chown -R lumoculis:lumoculis /app
 USER lumoculis
 
 ENV LUMOCULIS_DEVICE=cpu
+ENV LUMOCULIS_BACKEND=onnx
 ENV OMP_NUM_THREADS=1
 ENV MKL_NUM_THREADS=1
 ENV MALLOC_ARENA_MAX=2
 ENV LUMOCULIS_MAX_UPLOAD_MB=10
+ENV LUMOCULIS_MAX_IMAGE_PIXELS=12500000
 ENV PORT=10000
 
 EXPOSE 10000

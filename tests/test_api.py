@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import cv2
 import numpy as np
@@ -315,6 +316,69 @@ def test_predict_quality_warning_blocked_when_required(monkeypatch: pytest.Monke
         assert detail["error"] == "quality_gate_failed"
         assert detail["quality"]["status"] == "warning"
 
+def test_quality_gate_disabled_does_not_call_quality_assessment(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    calls = {"count": 0}
+
+    def _tracked(image, config):
+        calls["count"] += 1
+        return (QualityResult(status="pass", checks=[], image_width=64, image_height=64, decoded=True, reasons=[], thresholds={}), False)
+
+    monkeypatch.setattr(api_main, "_run_quality_assessment", _tracked)
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/predict",
+            files={"file": ("image.png", _make_png_bytes(), "image/png")},
+            data={"run_quality_gate": "false", "quality_required": "false", "gradcam": "false"},
+        )
+        assert response.status_code == OK, response.text
+    assert calls["count"] == 0
+
+
+def test_quality_gate_enabled_calls_quality_assessment(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    calls = {"count": 0}
+
+    def _tracked(image, config):
+        calls["count"] += 1
+        return (QualityResult(status="pass", checks=[], image_width=64, image_height=64, decoded=True, reasons=[], thresholds={}), False)
+
+    monkeypatch.setattr(api_main, "_run_quality_assessment", _tracked)
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/predict",
+            files={"file": ("image.png", _make_png_bytes(), "image/png")},
+            data={"run_quality_gate": "true", "quality_required": "false", "gradcam": "false"},
+        )
+        assert response.status_code == OK, response.text
+    assert calls["count"] == 1
+
+def test_predict_image_exactly_at_pixel_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    monkeypatch.setattr(api_main, "_image_dimensions", lambda content: (api_main.MAX_IMAGE_PIXELS, 1))
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/predict",
+            files={"file": ("image.png", _make_png_bytes(), "image/png")},
+            data={"run_quality_gate": "false"},
+        )
+        assert response.status_code == OK, response.text
+
+
+def test_predict_image_exceeds_pixel_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    monkeypatch.setattr(api_main, "_image_dimensions", lambda content: (api_main.MAX_IMAGE_PIXELS + 1, 1))
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/predict",
+            files={"file": ("image.png", _make_png_bytes(), "image/png")},
+            data={"run_quality_gate": "false"},
+        )
+        assert response.status_code == 413, response.text  # noqa: PLR2004
+        data = response.json()
+        detail = data.get("detail", data)
+        assert detail["error"] == "image_too_large"
+
 def test_predict_gradcam(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_api(monkeypatch)
     with TestClient(api_main.app) as client:
@@ -330,6 +394,72 @@ def test_predict_gradcam(monkeypatch: pytest.MonkeyPatch) -> None:
         gradcam_response = client.get(data["gradcam_url"])
         assert gradcam_response.status_code == OK
 
+
+def test_onnx_backend_predict(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    monkeypatch.setattr(api_main, "BACKEND", "onnx")
+    monkeypatch.setattr(api_main, "ONNX_MODEL_PATH", __file__)
+    monkeypatch.setattr(api_main, "model", MagicMock())
+    monkeypatch.setattr(api_main, "model_metadata", _dummy_metadata())
+    monkeypatch.setattr(api_main, "temperature_scaling", None)
+    monkeypatch.setattr(api_main, "model_error", None)
+    monkeypatch.setattr("lumoculis.onnx_inference.load_onnx_model", lambda path: MagicMock())
+    monkeypatch.setattr("lumoculis.onnx_inference.load_temperature", lambda path, num_classes=5: None)
+    monkeypatch.setattr(
+        "lumoculis.onnx_inference.prepare_input",
+        lambda image, image_size: (np.zeros((1, 3, image_size, image_size), dtype=np.float32), np.zeros((image_size, image_size, 3), dtype=np.uint8), image_size, image_size),
+    )
+    monkeypatch.setattr(
+        "lumoculis.onnx_inference.predict",
+        lambda session, input_array, temperature_scaling=None: (np.array([0.1, 0.1, 0.6, 0.1, 0.1]), None, 0.7, 2, True),
+    )
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/predict",
+            files={"file": ("image.png", _make_png_bytes(), "image/png")},
+            data={"run_quality_gate": "false", "quality_required": "false", "gradcam": "false"},
+        )
+        assert response.status_code == OK, response.text
+        data = response.json()
+        assert data["predicted_class"] == 2  # noqa: PLR2004
+        assert data["gradcam_saved"] is None
+        assert data["model_checkpoint"] == __file__
+
+
+def test_onnx_backend_gradcam_not_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_api(monkeypatch)
+    monkeypatch.setattr(api_main, "BACKEND", "onnx")
+    monkeypatch.setattr(api_main, "ONNX_MODEL_PATH", __file__)
+    monkeypatch.setattr(api_main, "model", MagicMock())
+    monkeypatch.setattr(api_main, "model_metadata", _dummy_metadata())
+    monkeypatch.setattr(api_main, "temperature_scaling", None)
+    monkeypatch.setattr(api_main, "model_error", None)
+    monkeypatch.setattr("lumoculis.onnx_inference.load_onnx_model", lambda path: MagicMock())
+    monkeypatch.setattr("lumoculis.onnx_inference.load_temperature", lambda path, num_classes=5: None)
+    with TestClient(api_main.app) as client:
+        response = client.post(
+            "/predict",
+            files={"file": ("image.png", _make_png_bytes(), "image/png")},
+            data={"run_quality_gate": "false", "quality_required": "false", "gradcam": "true"},
+        )
+        assert response.status_code == BAD_REQUEST, response.text
+        data = response.json()
+        detail = data.get("detail", data)
+        assert detail["error"] == "gradcam_not_available"
+
+
+def test_onnx_backend_missing_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(api_main, "BACKEND", "onnx")
+    monkeypatch.setattr(api_main, "ONNX_MODEL_PATH", "missing.onnx")
+    monkeypatch.setattr(api_main, "model", None)
+    monkeypatch.setattr(api_main, "model_metadata", None)
+    monkeypatch.setattr(api_main, "temperature_scaling", None)
+    monkeypatch.setattr(api_main, "model_error", "no_onnx_model_configured")
+    with TestClient(api_main.app) as client:
+        response = client.get("/model-info")
+        assert response.status_code == OK
+        assert response.json()["model_loaded"] is False
+        assert response.json()["error"] == "no_onnx_model_configured"
 
 def test_model_info_no_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(api_main, "CHECKPOINT_PATH", "")

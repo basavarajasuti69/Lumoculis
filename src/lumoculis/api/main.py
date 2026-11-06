@@ -14,6 +14,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 
@@ -30,28 +31,57 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+from PIL import Image
 
 cv2.setNumThreads(1)
 import numpy as np  # noqa: E402
-import torch  # noqa: E402
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import BaseModel, ConfigDict  # noqa: E402
 
-from lumoculis.inference import (  # noqa: E402
-    RESEARCH_DISCLAIMER,
-    InferenceConfig,
-    _compute_predictions,
-    _load_checkpoint,
-    _load_temperature,
-    _pick_device,
-    _preprocess_image,
-    _run_gradcam_visualization,
-    _run_quality_assessment,
+RESEARCH_DISCLAIMER = (
+    "Lumoculis is a research prototype, not a medical device. Predictions are "
+    "not a diagnosis and are not a substitute for qualified clinical "
+    "assessment. Image-quality thresholds are heuristic and not clinically "
+    "validated. Grad-CAM highlights model-relevant regions but does not prove "
+    "disease location or causality. Calibration improves probability reliability "
+    "only to the extent supported by appropriate held-out data; it does not "
+    "establish clinical reliability. APTOS 2019 does not provide patient IDs, "
+    "and grouping exact duplicate images does not guarantee patient-level "
+    "independence. The system has not been clinically validated."
 )
-from lumoculis.quality import QualityConfig  # noqa: E402
+
+BACKEND = os.environ.get("LUMOCULIS_BACKEND", "pytorch").strip().lower()
+if BACKEND not in {"pytorch", "onnx"}:
+    raise RuntimeError("LUMOCULIS_BACKEND must be 'pytorch' or 'onnx'")
+
+if BACKEND == "pytorch":
+
+    from lumoculis.inference import (
+        RESEARCH_DISCLAIMER as _PT_RESEARCH_DISCLAIMER,
+    )
+    from lumoculis.inference import (
+        _compute_predictions,
+        _load_checkpoint,
+        _load_temperature,
+        _pick_device,
+        _preprocess_image,
+        _run_gradcam_visualization,
+        _run_quality_assessment,
+    )
+
+    # Keep the shared disclaimer identical to the PyTorch implementation.
+    RESEARCH_DISCLAIMER = _PT_RESEARCH_DISCLAIMER
+else:
+    _compute_predictions = None
+    _load_checkpoint = None
+    _load_temperature = None
+    _pick_device = None
+    _preprocess_image = None
+    _run_gradcam_visualization = None
+    _run_quality_assessment = None
 
 LOGGER = logging.getLogger("lumoculis.api")
 
@@ -70,8 +100,10 @@ if not CHECKPOINT_PATH or not Path(CHECKPOINT_PATH).exists():
         CHECKPOINT_PATH = ""
 
 CALIBRATION_PATH = os.environ.get("LUMOCULIS_CALIBRATION") or None
+ONNX_MODEL_PATH = os.environ.get("LUMOCULIS_ONNX_MODEL") or "models/best.onnx"
 DEVICE = os.environ.get("LUMOCULIS_DEVICE", DEFAULT_DEVICE)
 MAX_UPLOAD_MB = float(os.environ.get("LUMOCULIS_MAX_UPLOAD_MB", str(DEFAULT_MAX_UPLOAD_MB)))
+MAX_IMAGE_PIXELS = int(os.environ.get("LUMOCULIS_MAX_IMAGE_PIXELS", "12500000"))
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.environ.get("LUMOCULIS_CORS_ORIGINS", DEFAULT_CORS_ORIGINS).split(",")
@@ -195,11 +227,51 @@ def _validate_upload_file(file: UploadFile) -> bytes:
     return content
 
 
+
+
+def _image_dimensions(content: bytes) -> tuple[int, int] | None:
+    """Return (width, height) from image headers without full decoding when possible."""
+    try:
+        with Image.open(io.BytesIO(content)) as image:
+            return int(image.width), int(image.height)
+    except Exception:
+        return None
+
+
 def _decode_image(content: bytes, filename: str) -> np.ndarray:
+    dimensions = _image_dimensions(content)
+    if dimensions is not None:
+        width, height = dimensions
+        if width * height > MAX_IMAGE_PIXELS:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "error": "image_too_large",
+                    "message": (
+                        f"Image dimensions {width}x{height} "
+                        f"({width * height} pixels) exceed the maximum of "
+                        f"{MAX_IMAGE_PIXELS} pixels."
+                    ),
+                },
+            )
+
     array = np.frombuffer(content, dtype=np.uint8)
     img = cv2.imdecode(array, cv2.IMREAD_COLOR)
     if img is None or img.size == 0:
         raise HTTPException(status_code=400, detail="could not decode image file")
+
+    if img.shape[0] * img.shape[1] > MAX_IMAGE_PIXELS:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error": "image_too_large",
+                "message": (
+                    f"Image dimensions {img.shape[1]}x{img.shape[0]} "
+                    f"({img.shape[0] * img.shape[1]} pixels) exceed the maximum of "
+                    f"{MAX_IMAGE_PIXELS} pixels."
+                ),
+            },
+        )
     return img
 
 
@@ -227,12 +299,42 @@ def _serialize_quality_result(result: Any) -> QualityResultModel:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # noqa: PLR0915
     global model, model_metadata, temperature_scaling, model_error  # noqa: PLW0603
     model = None
     model_metadata = None
     temperature_scaling = None
     model_error = None
+
+    if BACKEND == "onnx":
+        if not ONNX_MODEL_PATH or not Path(ONNX_MODEL_PATH).exists():
+            model_error = "no_onnx_model_configured"
+            LOGGER.warning("LUMOCULIS_ONNX_MODEL is not set or the ONNX model is missing")
+            yield
+            return
+        try:
+            from lumoculis.onnx_inference import load_onnx_model, load_temperature  # noqa: PLC0415
+
+            loaded_model = load_onnx_model(ONNX_MODEL_PATH)
+            model = loaded_model
+            model_metadata = {"config": {"model_name": "efficientnet_b0", "num_classes": 5}, "epoch": None, "val_qwk": None}
+            temperature_scaling = load_temperature(CALIBRATION_PATH, 5)
+            import gc  # noqa: PLC0415
+
+            gc.collect()
+            try:
+                import ctypes  # noqa: PLC0415
+
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except (OSError, AttributeError):
+                pass
+            LOGGER.info("Lumoculis ONNX model loaded from %s", ONNX_MODEL_PATH)
+        except Exception as exc:
+            model_error = "model_initialization_failed"
+            LOGGER.exception("Failed to load ONNX model: %s", exc)
+        yield
+        GRADCAM_DIR.cleanup()
+        return
 
     if not CHECKPOINT_PATH:
         model_error = "no_checkpoint_configured"
@@ -241,6 +343,8 @@ async def lifespan(app: FastAPI):
         return
 
     try:
+        import torch  # noqa: PLC0415
+
         torch.set_num_threads(1)
         try:
             torch.set_num_interop_threads(1)
@@ -262,7 +366,7 @@ async def lifespan(app: FastAPI):
         except (OSError, AttributeError):
             pass
         LOGGER.info("Lumoculis model loaded from %s", CHECKPOINT_PATH)
-    except Exception as exc:  # keep startup resilient; /health reports degraded status
+    except Exception as exc:
         model_error = "model_initialization_failed"
         LOGGER.exception("Failed to load Lumoculis checkpoint: %s", exc)
     yield
@@ -289,13 +393,13 @@ app.mount("/gradcam", StaticFiles(directory=GRADCAM_DIR.name), name="gradcam")
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    if model_error == "no_checkpoint_configured":
+    if model_error in {"no_checkpoint_configured", "no_onnx_model_configured"}:
         return HealthResponse(
             status="degraded",
             model_loaded=False,
             checkpoint_configured=False,
             device=DEVICE,
-            error="no_checkpoint_configured",
+            error=model_error,
         )
     if model_error:
         return HealthResponse(
@@ -315,12 +419,12 @@ def health() -> HealthResponse:
 
 @app.get("/model-info", response_model=ModelInfo)
 def model_info() -> ModelInfo:
-    if model_error == "no_checkpoint_configured":
+    if model_error in {"no_checkpoint_configured", "no_onnx_model_configured"}:
         return ModelInfo(
             model_loaded=False,
             checkpoint_configured=False,
             device=DEVICE,
-            error="no_checkpoint_configured",
+            error=model_error,
         )
     if model_error:
         return ModelInfo(
@@ -340,7 +444,7 @@ def model_info() -> ModelInfo:
     return ModelInfo(
         model_loaded=True,
         checkpoint_configured=True,
-        checkpoint_path=CHECKPOINT_PATH,
+        checkpoint_path=(ONNX_MODEL_PATH if BACKEND == "onnx" else CHECKPOINT_PATH),
         device=DEVICE,
         architecture=config_metadata.get("model_name"),
         num_classes=config_metadata.get("num_classes"),
@@ -361,6 +465,13 @@ class _PredictionParams:
     gradcam: bool
 
 
+def _run_quality_assessment(image, config):
+    """Compatibility wrapper for the PyTorch quality gate."""
+    from lumoculis.inference import _run_quality_assessment as _pt_quality  # noqa: PLC0415
+
+    return _pt_quality(image, config)
+
+
 def _make_inference_config(
     *,
     device_name: str,
@@ -368,9 +479,12 @@ def _make_inference_config(
     quality_required: bool,
     gradcam: bool,
     gradcam_output: str | None,
-) -> InferenceConfig:
+):
+    from lumoculis.inference import InferenceConfig  # noqa: PLC0415
+    from lumoculis.quality import QualityConfig  # noqa: PLC0415
+
     return InferenceConfig(
-        checkpoint_path=CHECKPOINT_PATH,
+        checkpoint_path=(ONNX_MODEL_PATH if BACKEND == "onnx" else CHECKPOINT_PATH),
         image_size=384,
         num_classes=5,
         device=device_name,
@@ -383,7 +497,7 @@ def _make_inference_config(
     )
 
 
-def _run_prediction(params: _PredictionParams) -> PredictionResponse:
+def _run_prediction(params: _PredictionParams) -> PredictionResponse:  # noqa: PLR0912, PLR0915
     img = params.img
     filename = params.filename
     device_name = params.device_name
@@ -393,6 +507,90 @@ def _run_prediction(params: _PredictionParams) -> PredictionResponse:
 
     if model is None:
         raise HTTPException(status_code=503, detail="model is not available")
+
+    if BACKEND == "onnx":
+        if gradcam:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "gradcam_not_available",
+                    "message": "Grad-CAM is not available with the ONNX backend.",
+                },
+            )
+
+        from lumoculis.onnx_inference import predict, prepare_input  # noqa: PLC0415
+        from lumoculis.quality import QualityConfig, assess_quality  # noqa: PLC0415
+
+        quality_result = None
+        quality_blocked = False
+        if run_quality_gate:
+            quality_result = assess_quality(img, QualityConfig())
+            if quality_required and quality_result.status != "pass":
+                quality_blocked = True
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "quality_gate_failed",
+                        "quality": _serialize_quality_result(quality_result).model_dump(),
+                        "disclaimer": RESEARCH_DISCLAIMER,
+                    },
+                )
+
+        input_array, rgb_image, width, height = prepare_input(img, 384)
+        img = None
+
+        try:
+            raw_probs_1d, calibrated_probs_1d, referable_prob, predicted_class, referable = predict(
+                model, input_array, temperature_scaling
+            )
+        except Exception as exc:
+            LOGGER.exception("ONNX inference failed")
+            raise HTTPException(status_code=500, detail="inference_failed") from exc
+
+        input_array = None
+        rgb_image = None
+
+        import gc  # noqa: PLC0415
+
+        gc.collect()
+        try:
+            import ctypes  # noqa: PLC0415
+
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
+
+        temperature = (
+            float(temperature_scaling.temperature)
+            if (temperature_scaling is not None and getattr(temperature_scaling, "fitted", False))
+            else None
+        )
+        temperature_applied = temperature is not None
+
+        return PredictionResponse(
+            predicted_class=int(predicted_class),
+            predicted_grade=int(predicted_class),
+            referable=bool(referable),
+            referable_probability=float(referable_prob),
+            raw_probabilities=[float(p) for p in raw_probs_1d],
+            calibrated_probabilities=(
+                [float(p) for p in calibrated_probs_1d] if calibrated_probs_1d is not None else None
+            ),
+            temperature=temperature,
+            temperature_applied=temperature_applied,
+            quality=_serialize_quality_result(quality_result) if quality_result is not None else None,
+            quality_blocked=bool(quality_blocked),
+            gradcam_saved=None,
+            gradcam_url=None,
+            model_checkpoint=ONNX_MODEL_PATH,
+            model_architecture=(model_metadata.get("config", {}).get("model_name") if model_metadata else None),
+            image_width=int(width),
+            image_height=int(height),
+            filename=filename,
+        )
+
+    # PyTorch backend.
+    from lumoculis.inference import _pick_device  # noqa: PLC0415
 
     device = _pick_device(device_name)
 
@@ -436,6 +634,17 @@ def _run_prediction(params: _PredictionParams) -> PredictionResponse:
 
     if not gradcam:
         input_tensor = None
+        rgb_image = None
+
+    import gc  # noqa: PLC0415
+
+    gc.collect()
+    try:
+        import ctypes  # noqa: PLC0415
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
 
     if not gradcam:
         img = None
@@ -495,7 +704,6 @@ def _run_prediction(params: _PredictionParams) -> PredictionResponse:
         image_height=int(height),
         filename=filename,
     )
-
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(
