@@ -158,8 +158,9 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export async function generateGradCam(file: File, targetClass: number): Promise<string> {
+  const compressed = await compressImageForUpload(file, 4 * 1024 * 1024);
   const formData = new FormData();
-  formData.append("file", file, file.name);
+  formData.append("file", compressed, compressed.name);
   formData.append("target_class", String(targetClass));
 
   const res = await fetch("/api/gradcam", {
@@ -186,6 +187,52 @@ export async function generateGradCam(file: File, targetClass: number): Promise<
 
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+async function compressImageForUpload(file: File, maxBytes: number): Promise<File> {
+  if (file.size <= maxBytes) return file;
+
+  const bitmap = await createImageBitmap(file);
+  const origWidth = bitmap.width;
+  const origHeight = bitmap.height;
+  const canvas = document.createElement("canvas");
+  canvas.width = origWidth;
+  canvas.height = origHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    return file;
+  }
+  ctx.drawImage(bitmap, 0, 0);
+
+  let quality = 0.9;
+  let blob: Blob | null = null;
+  while (quality >= 0.4) {
+    blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", quality)
+    );
+    if (blob && blob.size <= maxBytes) break;
+    quality -= 0.1;
+  }
+  if (!blob || blob.size > maxBytes) {
+    // Fall back to downscaling dimensions.
+    const scale = Math.sqrt(maxBytes / file.size);
+    canvas.width = Math.max(32, Math.floor(origWidth * scale));
+    canvas.height = Math.max(32, Math.floor(origHeight * scale));
+    const ctx2 = canvas.getContext("2d");
+    if (ctx2) {
+      ctx2.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    }
+    blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.85)
+    );
+  }
+  if (!blob) {
+    bitmap.close();
+    return file;
+  }
+  bitmap.close();
+  return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" });
 }
 
 export function resolveGradCamUrl(url: string | null | undefined): string | null {
