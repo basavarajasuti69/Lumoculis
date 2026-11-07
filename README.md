@@ -243,7 +243,12 @@ Backend:
 
 Frontend:
 
-- `NEXT_PUBLIC_API_URL`: backend URL
+- `NEXT_PUBLIC_API_URL`: Render prediction API URL
+- `MODAL_GRADCAM_URL`: Modal `/gradcam` endpoint (server-side only)
+- `MODAL_GRADCAM_TOKEN`: Modal bearer token (server-side only)
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: activate distributed rate limiting (server-side only)
+
+Never add secret values to source control. See [Production Deployment](docs/deployment.md) for full configuration.
 
 ## Usage
 
