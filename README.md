@@ -27,7 +27,11 @@ Diabetic retinopathy is a leading cause of preventable vision loss. Lumoculis ex
 
 ## Screenshots
 
-Add current screenshots of the deployed application to `docs/screenshots/` before release. Recommended captures are the homepage, analysis workspace, and prediction results with Grad-CAM enabled.
+![Homepage](docs/screenshots/homepage.png)
+
+![Analyze workspace](docs/screenshots/analyze.png)
+
+![Grad-CAM results](docs/screenshots/gradcam-results.png)
 
 ## Production Architecture
 
