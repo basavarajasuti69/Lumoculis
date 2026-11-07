@@ -15,7 +15,9 @@ Diabetic retinopathy is a leading cause of preventable vision loss. Lumoculis ex
 - Five-class DR severity classification (grades 0–4).
 - Referable DR flag for grades 2–4.
 - Heuristic image-quality checks: resolution, exposure, blur, and retinal field of view.
-- Optional Grad-CAM visualizations.
+- Optional cloud-hosted Grad-CAM visualizations (Modal + PyTorch).
+- Browser-side JPEG compression for Grad-CAM uploads.
+- Server-side Vercel proxy with Upstash Redis rate limiting (10 requests per IP per minute when configured).
 - Temperature-scaled probability calibration.
 - FastAPI backend with JSON prediction reports.
 - Next.js frontend and legacy Streamlit interface.
@@ -25,31 +27,19 @@ Diabetic retinopathy is a leading cause of preventable vision loss. Lumoculis ex
 
 ## Screenshots
 
-Screenshots can be added here after running the application locally.
+Add current screenshots of the deployed application to `docs/screenshots/` before release. Recommended captures are the homepage, analysis workspace, and prediction results with Grad-CAM enabled.
 
-- `docs/screenshots/homepage.png` — homepage
-- `docs/screenshots/analyze.png` — analysis workspace
-- `docs/screenshots/results.png` — prediction results
+## Production Architecture
 
-## System Architecture
+**Prediction flow:** Browser → Vercel Next.js frontend → Render FastAPI/ONNX prediction API → prediction response.
 
-```text
-Retinal image upload
-        |
-        v
-FastAPI backend (src/lumoculis/api/main.py)
-        |
-        +-- image validation and preprocessing
-        +-- EfficientNet-B0 inference
-        +-- optional quality gate
-        +-- optional Grad-CAM
-        +-- optional temperature calibration
-        |
-        v
-JSON prediction response + downloadable report
-```
+**Optional Grad-CAM flow:** Browser → Vercel `/api/gradcam` proxy → Upstash Redis rate limiter → authenticated Modal Grad-CAM service → private S3 PyTorch checkpoint → PNG visualization.
 
-The Python package under `src/lumoculis/` contains model loading, preprocessing, inference, quality assessment, calibration, metrics, and data splitting. The Next.js frontend in `frontend/` consumes the FastAPI API. A Streamlit application in `app.py` remains available.
+The browser compresses a copy of the uploaded image for Grad-CAM to fit within Vercel's request-body limit; the original image is retained for prediction. Grad-CAM is optional, and a visualization failure does not invalidate a successful prediction.
+
+The Python package under `src/lumoculis/` contains model loading, preprocessing, inference, quality assessment, calibration, metrics, and data splitting. The Next.js frontend is in `frontend/`; the Modal service is in `deploy/modal/gradcam.py`. A Streamlit application in `app.py` remains available.
+
+See [Architecture](docs/architecture.md) and [Production Deployment](docs/deployment.md).
 
 ## Technology Stack
 
@@ -239,7 +229,7 @@ npm install
 npm run dev
 ```
 
-Set `NEXT_PUBLIC_API_URL` if the backend is not at `http://localhost:8000`.
+Set `NEXT_PUBLIC_API_URL` to the local FastAPI base URL (normally `http://localhost:8000`). For local Grad-CAM, also configure the server-side Modal URL and token. Upstash credentials are required to activate rate limiting. See [Production Deployment](docs/deployment.md); do not commit `.env.local`.
 
 ## Environment Variables
 
